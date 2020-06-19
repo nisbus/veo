@@ -1,0 +1,6 @@
+-sname ${NAME}
+
+-setcookie ${COOKIE}
+
++K true
++A30

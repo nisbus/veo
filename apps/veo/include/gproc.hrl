@@ -1,0 +1,3 @@
+-define(CONTAINER(NAME), {p,l, {container, NAME}}).
+-define(NODE(NAME), {p,l,{node, NAME}}).
+-define(INFO_SUBSCRIPTION(), {p, l, info_changed}). 

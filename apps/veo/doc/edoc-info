@@ -1,0 +1,4 @@
+%% encoding: UTF-8
+{application,volta_scheduler}.
+{modules,[container_builder,container_monitor,container_storage,container_sup,
+          dns_registry,node_monitor,settings,volta_scheduler_app]}.

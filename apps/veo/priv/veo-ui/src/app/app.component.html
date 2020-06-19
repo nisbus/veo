@@ -1,0 +1,28 @@
+<!--The content below is only a placeholder and can be replaced.-->
+<div style="text-align:center">
+  <ul>
+    <li *ngFor="let node of nodes">
+      <h1>{{node.node}}</h1>
+      <h3>Memory</h3>
+      <p>Total: {{node.resources.memory.total}}</p>
+      <p>Used: {{node.resources.memory.used}}</p>
+      <p>Available: {{node.resources.memory.available}}</p>
+      <h3>CPU</h3>
+      <p>Count: {{node.resources.cpu.count}}</p>
+      <p>Used: {{node.resources.cpu.used}}</p>
+      <p>Available: {{node.resources.cpu.available}}</p>
+      <h3>Disk</h3>
+      <p>Total: {{node.resources.disk.total}}</p>
+      <p>Used: {{node.resources.disk.used}}</p>
+      <p>Available: {{node.resources.disk.available}}</p>
+      
+      <h2>Containers </h2>
+      <ul>
+  	<li *ngFor="let container of node.containers">
+  	  <p>{{container}}</p>
+	</li>
+      </ul>
+    </li>
+  </ul>
+</div>  
+<router-outlet></router-outlet>

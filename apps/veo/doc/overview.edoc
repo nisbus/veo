@@ -1,0 +1,72 @@
+@author nisbus <nisbus@gmail.com>
+   @copyright 2020 nisbus
+   @version 0.2.0
+   @title Welcome to VEO
+   @doc == VEO is a docker container scheduler with built in DNS.==
+    <br/>
+   This is a masterless cluster which syncs via Erlang OTP node connections and syncs data using
+   Mnesia.
+   <br/>
+   === Getting started ===
+   <br/>
+   The makefile is the best way to get started with VEO.
+   <br/>
+   `make start' : Starts a single instance of VEO on your local machine.
+   <br/>
+   `make multiple' : Starts two instances of VEO in separate docker containers.
+   <br/>
+   `make three' : Starts three instances of VEO in separate docker containers.
+   <br/>
+   The default cluster.yml (in apps/veo/priv) defines two nodes (uno and dos) which both have the role of master.
+   <br/>
+   It also defines two services (using the nginx container) one in host network mode and other in bridge mode.
+   <br/>
+   If you use start or three with the makefile you should edit the cluster.yml to either remove one host or add the third.
+   <br/>
+   <br/>
+   ==== Getting the nodes ready ====
+   <br/>
+   This guide assumes you started with make multiple so you now have two containers running VEO (uno and dos).
+   <br/>
+   Start two separate shells and exec into the containers:
+   <br/>
+   `docker exec -it uno bash'
+   <br/>   
+   `docker exec -it dos bash'
+   <br/>
+   Now you need to get the nginx image into both containers via docker, so in both run:
+   <br/>
+   `docker pull nginx'
+   <br/>
+   Change the resolv.conf to point to localhost: `echo "nameserver 127.0.0.1" > /etc/resolv.conf'
+   <br/>
+   You are now ready to attach to the shell of VEO in each container: `./_build/default/rel/veo/bin/veo attach'
+   <br/>
+   ==== Starting containers ====
+   <br/>   
+   inside the shell type the following: `[H|[T]] = settings:get_applications().'
+   <br/>
+   You now have the parsed definitions of the two nginx containers specified in the cluster.yml.
+   <br/>
+   To start a container type `container_sup:add_service(T).'
+   <br/>
+   You will see one of the nodes starting an nginx container in host mode.
+   ==== Verifying the cluster state and DNS ====
+   Now that you have a container running we can verify that it is actually there and registered with the DNS in both nodes.
+   <br/>
+   Exit the attached shells in both nodes (CTRL+d) `NOTE: CTRL+c will stop the node)'
+   <br/>
+   In the shell of both of the nodes type `dig ngnix.veo'
+   <br/>
+   This should return an A record with the IP of the node that is running the nginx service.
+   <br/>
+   The default configuration file specifies two ports for the nginx service, one is 500 and called port1 and the other one is randomly assigned and bound to nginx port 80 (called website).
+   <br/>
+   You can verify this as well with the DNS:
+   <br/>
+   `dig _website._tcp.nginx.veo SRV' will show you the port assigned to the nginx container.
+   <br/>
+   `curl website.nginx.veo:<PORT FROM SRV QUERY>' should show `Welcome to ngnix!'.
+   <br/>
+   <br/>
+   Have FUN!

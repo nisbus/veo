@@ -1,0 +1,232 @@
+{
+  "Id": "bbbf8890cc57a2460a3f139d25dface66b49773cfb8ee96399721289b2e6e144",
+  "Created": "2020-03-04T13:25:33.281271412Z",
+  "Path": "python3",
+  "Args": [
+    "-m",
+    "src.provisioner",
+    "127.0.0.1:6754",
+    "0.0.0.0",
+    "6755"
+  ],
+  "State": {
+    "Status": "running",
+    "Running": true,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 19170,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2020-03-04T13:25:34.511518563Z",
+    "FinishedAt": "0001-01-01T00:00:00Z"
+  },
+  "Image": "sha256:43e4ae0c3bd062d2ff52e8d971f0b847d8a6fdeb1258dc6f1b0e6bc1e535d2c6",
+  "ResolvConfPath": "/var/lib/docker/containers/bbbf8890cc57a2460a3f139d25dface66b49773cfb8ee96399721289b2e6e144/resolv.conf",
+  "HostnamePath": "/var/lib/docker/containers/bbbf8890cc57a2460a3f139d25dface66b49773cfb8ee96399721289b2e6e144/hostname",
+  "HostsPath": "/var/lib/docker/containers/bbbf8890cc57a2460a3f139d25dface66b49773cfb8ee96399721289b2e6e144/hosts",
+  "LogPath": "/var/lib/docker/containers/bbbf8890cc57a2460a3f139d25dface66b49773cfb8ee96399721289b2e6e144/bbbf8890cc57a2460a3f139d25dface66b49773cfb8ee96399721289b2e6e144-json.log",
+  "Name": "/docker_volta_gnmi_client_1_4faed9d1f737",
+  "RestartCount": 0,
+  "Driver": "overlay2",
+  "Platform": "linux",
+  "MountLabel": "",
+  "ProcessLabel": "",
+  "AppArmorProfile": "docker-default",
+  "ExecIDs": null,
+  "HostConfig": {
+    "Binds": [],
+    "ContainerIDFile": "",
+    "LogConfig": {
+      "Type": "json-file",
+      "Config": null
+    },
+    "NetworkMode": "host",
+    "PortBindings": {
+      "6754/tcp": [
+        {
+          "HostIp": "",
+          "HostPort": "6754"
+        }
+      ],
+      "6755/tcp": [
+        {
+          "HostIp": "",
+          "HostPort": "6755"
+        }
+      ]
+    },
+    "RestartPolicy": {
+      "Name": "on-failure",
+      "MaximumRetryCount": 0
+    },
+    "AutoRemove": false,
+    "VolumeDriver": "",
+    "VolumesFrom": [],
+    "CapAdd": null,
+    "CapDrop": null,
+    "Dns": null,
+    "DnsOptions": null,
+    "DnsSearch": null,
+    "ExtraHosts": null,
+    "GroupAdd": null,
+    "IpcMode": "shareable",
+    "Cgroup": "",
+    "Links": null,
+    "OomScoreAdj": 0,
+    "PidMode": "",
+    "Privileged": false,
+    "PublishAllPorts": false,
+    "ReadonlyRootfs": false,
+    "SecurityOpt": null,
+    "UTSMode": "",
+    "UsernsMode": "",
+    "ShmSize": 67108864,
+    "Runtime": "runc",
+    "ConsoleSize": [
+      0,
+      0
+    ],
+    "Isolation": "",
+    "CpuShares": 0,
+    "Memory": 0,
+    "NanoCpus": 0,
+    "CgroupParent": "",
+    "BlkioWeight": 0,
+    "BlkioWeightDevice": null,
+    "BlkioDeviceReadBps": null,
+    "BlkioDeviceWriteBps": null,
+    "BlkioDeviceReadIOps": null,
+    "BlkioDeviceWriteIOps": null,
+    "CpuPeriod": 0,
+    "CpuQuota": 0,
+    "CpuRealtimePeriod": 0,
+    "CpuRealtimeRuntime": 0,
+    "CpusetCpus": "",
+    "CpusetMems": "",
+    "Devices": null,
+    "DeviceCgroupRules": null,
+    "DiskQuota": 0,
+    "KernelMemory": 0,
+    "MemoryReservation": 0,
+    "MemorySwap": 0,
+    "MemorySwappiness": null,
+    "OomKillDisable": false,
+    "PidsLimit": 0,
+    "Ulimits": null,
+    "CpuCount": 0,
+    "CpuPercent": 0,
+    "IOMaximumIOps": 0,
+    "IOMaximumBandwidth": 0,
+    "MaskedPaths": [
+      "/proc/asound",
+      "/proc/acpi",
+      "/proc/kcore",
+      "/proc/keys",
+      "/proc/latency_stats",
+      "/proc/timer_list",
+      "/proc/timer_stats",
+      "/proc/sched_debug",
+      "/proc/scsi",
+      "/sys/firmware"
+    ],
+    "ReadonlyPaths": [
+      "/proc/bus",
+      "/proc/fs",
+      "/proc/irq",
+      "/proc/sys",
+      "/proc/sysrq-trigger"
+    ]
+  },
+  "GraphDriver": {
+    "Data": {
+      "LowerDir": "/var/lib/docker/overlay2/26e63041f0e53082f3ec5219fa2b72166a254f4d60e0c01a3f634bc5a05f30de-init/diff:/var/lib/docker/overlay2/7c6e5f525b285a0459b825fdf81df92976b1d6505626ea6fe319ba223c3d8a99/diff:/var/lib/docker/overlay2/5039aacea665eef9d3056c9a11f0ea384dd27e44460b06637b3b80b4d84ca9c0/diff:/var/lib/docker/overlay2/1b09ff9092bfebfd87a84549b9927cce209fca6c1cb40f0c8a754631ac43bb1b/diff:/var/lib/docker/overlay2/506e123a4a8fe5407a67c31aa6ec5a4ace9ecf1854f320f490e574dd4405fda1/diff:/var/lib/docker/overlay2/85de2311da40ccac1daff407174a2e54fedcd2e367c33def5bb60ef3811c4af6/diff:/var/lib/docker/overlay2/b1730763e32f30212c43f62546db4173717f0bfedde1d52cab4f139076c37fe6/diff",
+      "MergedDir": "/var/lib/docker/overlay2/26e63041f0e53082f3ec5219fa2b72166a254f4d60e0c01a3f634bc5a05f30de/merged",
+      "UpperDir": "/var/lib/docker/overlay2/26e63041f0e53082f3ec5219fa2b72166a254f4d60e0c01a3f634bc5a05f30de/diff",
+      "WorkDir": "/var/lib/docker/overlay2/26e63041f0e53082f3ec5219fa2b72166a254f4d60e0c01a3f634bc5a05f30de/work"
+    },
+    "Name": "overlay2"
+  },
+  "Mounts": [],
+  "Config": {
+    "Hostname": "nisbus-volta",
+    "Domainname": "",
+    "User": "",
+    "AttachStdin": false,
+    "AttachStdout": false,
+    "AttachStderr": false,
+    "ExposedPorts": {
+      "6754/tcp": null,
+      "6755/tcp": null
+    },
+    "Tty": false,
+    "OpenStdin": false,
+    "StdinOnce": false,
+    "Env": [
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "PYTHONPATH=:/volta-gnmi/proto/:/volta-gnmi/:/volta-gnmi/customer_scripts/:/volta-gnmi/customer_scripts/src/:/volta-gnmi/src/:/volta-gnmi/customer_scripts/vuser-api-model/build/python/"
+    ],
+    "Cmd": [
+      "127.0.0.1:6754",
+      "0.0.0.0",
+      "6755"
+    ],
+    "Image": "registry.voltanet.io:4567/volta/containers/devel/volta-gnmi-client:19.6-1-4-g8a34583",
+    "Volumes": null,
+    "WorkingDir": "/volta-gnmi",
+    "Entrypoint": [
+      "python3",
+      "-m",
+      "src.provisioner"
+    ],
+    "OnBuild": null,
+    "Labels": {
+      "com.docker.compose.config-hash": "e9c1cd0707cb087645759f142b34e0e6848b16152dc61e7b8ffa44e6e74ced3b",
+      "com.docker.compose.container-number": "1",
+      "com.docker.compose.oneoff": "False",
+      "com.docker.compose.project": "docker",
+      "com.docker.compose.service": "volta_gnmi_client",
+      "com.docker.compose.slug": "4faed9d1f7371f512c3697f320181ea568f3259f41ab505b3b541246408027f",
+      "com.docker.compose.version": "1.23.1",
+      "customer_scripts": "19.6-1-4-gecc21a4",
+      "vuser-api-model": "19.6-6-g6865643"
+    }
+  },
+  "NetworkSettings": {
+    "Bridge": "",
+    "SandboxID": "5f09ac1dfa66ba238ed27f0d3f9a85cadd9f000935cf25bd0dcd20837d1c3e88",
+    "HairpinMode": false,
+    "LinkLocalIPv6Address": "",
+    "LinkLocalIPv6PrefixLen": 0,
+    "Ports": null,
+    "SandboxKey": "/var/run/docker/netns/default",
+    "SecondaryIPAddresses": null,
+    "SecondaryIPv6Addresses": null,
+    "EndpointID": "",
+    "Gateway": "",
+    "GlobalIPv6Address": "",
+    "GlobalIPv6PrefixLen": 0,
+    "IPAddress": "",
+    "IPPrefixLen": 0,
+    "IPv6Gateway": "",
+    "MacAddress": "",
+    "Networks": {
+      "host": {
+        "IPAMConfig": null,
+        "Links": null,
+        "Aliases": null,
+        "NetworkID": "17247ad84cb111acc4c5262d3a50abc679d5a31d33ebdac88c2122f8334fd11e",
+        "EndpointID": "4dae13b64624730f50290620463e2fbe64cdb92479c57bcb18255fbb6e307b1e",
+        "Gateway": "",
+        "IPAddress": "",
+        "IPPrefixLen": 0,
+        "IPv6Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "MacAddress": "",
+        "DriverOpts": null
+      }
+    }
+  }
+}

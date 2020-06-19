@@ -22,5 +22,7 @@ rebar.lock
 node_modules/
 dist/
 nginx.container
-apps/veo/doc/
-apps/veo/doc
+apps/veo/doc/*
+!apps/veo/doc/overview.edoc
+#*
+.#*

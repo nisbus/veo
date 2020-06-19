@@ -1,118 +1,102 @@
 # VEO
+  
+VEO is a docker container scheduler with built in DNS.  
+  
+This is a masterless cluster which syncs via Erlang OTP node connections and syncs data using
+Mnesia.
+  
+## Getting started  
+   
+The makefile is the best way to get started with VEO.  
+  
+`make start` : Starts a single instance of VEO on your local machine.  
+  
+`make multiple` : Starts two instances of VEO in separate docker containers.  
+  
+`make three` : Starts three instances of VEO in separate docker containers.  
+  
+The default cluster.yml (in apps/veo/priv) defines two nodes (uno and dos) which both have the role of master.  
+  
+It also defines two services (using the nginx container) one in host network mode and other in bridge mode.  
+  
+If you use start or three with the makefile you should edit the cluster.yml to either remove one host or add the third.  
+  
+  
+## Getting the nodes ready
+  
+This guide assumes you started with make multiple so you now have two containers running VEO (uno and dos).  
+  
+Start two separate shells and exec into the containers:  
+  
+```bash
+docker exec -it uno bash
+```  
+  
+```bash
+docker exec -it dos bash
+```  
+  
+Now you need to get the nginx image into both containers via docker, so in both run:  
+  
+```bash
+docker pull nginx
+```
+  
+Change the resolv.conf to point to localhost:   
+```
+echo "nameserver 127.0.0.1" > /etc/resolv.conf
+```  
+  
+You are now ready to attach to the shell of VEO in each container: 
+```bash
+./_build/default/rel/veo/bin/veo attach
+```
+  
+### Starting containers  
+  
+inside the shell type the following:   
+```erlang
+[H|[T]] = settings:get_applications().
+```  
+  
+You now have the parsed definitions of the two nginx containers specified in the cluster.yml.  
+   
+To start a container type   
+```erlang
+container_sup:add_service(T).
+```  
+  
+You will see one of the nodes starting an nginx container in host mode.  
 
-An OTP application
-
-See the doc folder for an overview.
-
-Build
------
-
-    $ rebar3 compile
-
-
-OVERVIEW
---------
-
-VEO is a Docker scheduler for running docker containers in a multi node environment.  
+### Verifying the cluster state and DNS  
   
-Getting started
----------------
-
-### Local testing  
+Now that you have a container running we can verify that it is actually there and registered with the DNS in both nodes.  
   
-You can start a scheduler locally with `rebar3 shell --name=uno@uno`  
-This will drop you into an Erlang shell connected to the local node.  
-You can test reading the yaml config file into the shell to get some service definitions:  
-`Apps = settings:get_applications().`  
-To view the list just type `Apps.` and press enter.  
-To get the first instance from the list you can use:  
-`[First|Rest] = Apps.`  
-This will leave you with a single service definition in the First variable.  
-The Rest variable will container the rest of the list (you can repeat this with [Second|Rest2] = Rest. etc).  
-if you know the length of the list you can also just do:  
-`[F,S,T] = Apps.` (for a list of 3) so you have each service in a variable.  
-Now try starting a service:  
-`container_sup:add_service(First).`  
-This will try and start a container and you will see the log output in the console as well.  
-
-### Multiple nodes  
+Exit the attached shells in both nodes (`CTRL+d`) * NOTE: CTRL+c will stop the node) *  
   
-To run the test environment use `make multiple` from the root directory.  
-This will start two containers running the scheduler and they will be connected to each other.  
+In the shell of both of the nodes type   
+```bash
+dig ngnix.veo'
+```  
   
-exec into each one using `docker exec -it uno bash` and `docker exec -it dos bash`.  
-inside the containers pull down the nginx imgage `docker pull nginx`.  
+This should return an A record with the IP of the node that is running the nginx service.  
   
-Attach to the running schedulers using `./_build/default/rel/veo/bin/veo attach`.  
+The default configuration file specifies two ports for the nginx service, one is 500 and called port1 and the other one is randomly assigned and bound to nginx port 80 (called website).  
   
-copy and paste the following into the running shell:  
+You can verify this as well with the DNS:  
   
-`cd(code:priv_dir(veo)). cd("../include"). rr("service.hrl"). SM=#service{image="nginx", group="web", group_role=master, group_policy=master_kills_all}. SL=SM#service{group_role=slave}. H = SM#service{healthcheck=#healthcheck{cmd="curl --fail http://localhost:80 || exit 1"}}.`  
+```bash
+dig _website._tcp.nginx.veo SRV
+```  
+will show you the port assigned to the nginx container.
   
-You are now ready to start some containers.  
+```bash
+curl website.nginx.veo:<PORT FROM SRV QUERY>
+```  
+Should show `Welcome to ngnix!'.
   
-`container_sup:add_service(SM).` This starts an nginx container which is in the group "web" and has the group_role master.  
-`container_sup:add_service(SL).` This starts an nginx container which is in the group "web" and has the group_role slave.  
   
-Both containers will be started in the node the master started on because they share the same group.  
-Both also have the group_policy=master_kills_all.  
-This means that if the master container dies, the scheduler will kill all containers in the same group.  
-  
-You can try this by doing `docker kill <master_id>` from the shell of the node that has the containers.  
-  
-Start the third container which also has healthcheck enabled.  
-`container_sup:add_service(H)` This starts a new nginx container which is not in any group but has a healthcheck enabled.  
-Notice that the node that has the container will print out the status of the container every 5 seconds.  
-
-You are now ready to play with different kinds of services using the service record.  
-  
-> `#service{image=SomeImage, restart=never/restart, restart_count=integer, privileged=false/true, network_mode=<<"host">>/<<"default">>, pid_mode=undefined/<<"host">>, cpus=integer, memory=integer, disk=integer}`.  
-  
-You can see all of the properties of a service in the apps/veo/include/service.hrl file.  
-
-
-Config file (WIP)
------------------
-In the apps/veo/include/priv folder you will find a cluster.yml defining the cluster.  
-This file is copied into each container (to have different files per node you would have to map them to the containers).  
-  
-The structure of the file is very similar to a docker-compose file.  
-  
-It starts with a list of nodes in the cluster.  
-Each node element is of the format:  
-  
-  ```
-  -node: name@hostname
-   role: free text
-  ```  
-  
-The role can be used to restrict services to only run on specific role nodes.  
-  
-After the node definitions there are the services.  
-  
-Services have the same format for the most part as docker-compose.  
-Additional properties are:  
-  
-* roles: A list of roles the service is allowed to run on (not defined = any node).
-* hosts: A list of nodes the service is constrained to.  
-* group: A free text group for the service (Services in the same group will always be sent to the same node).  
-* group_role: Either master or slave, the group policy dictiates what this means.  
-* group_policy:  One of master_kills_all/one_kills_all/one_for_one.  
-                 master_kills_all: If a service with a group_role of master dies, all services in the group are killed/restarted.  
-				 one_kills_all: If any service within a group dies, all services in the group are killed/restarted.  
-				 one_for_one: If any service within a group dies, only that service is killed/restarted.  
-* restart: One of never/restart. never means the service is never restarted while restart will continue to try and keep the service alive.
-* restart_count: if the restart = restart, the service is restarted up until the restart count is reached. After that it is killed.
-  
-You can test the config file by changing the services in the default one.  
-If you only have one service get the definition into the shell of the attached application:  
-`[S] = settings:get_applications().`  
-  
-S is now the service record you can try and start like before:  
-`container_sup:add_service(S).`  
-  
-In case you have more than one service in your cluster.yml you need to filter the list to get the service you want, see lists:filter in the Erlang documentation.  
-  
+# Have FUN!  
   
 TODO
 ----
@@ -142,9 +126,6 @@ Define the API to interact with the cluster.
   
 
 ### UI
-Connect the UI to the websockets connection and display the status of the cluster.  
-* Resources (per node and total).
-* Containers (location, status).
 * Add commands for the REST API.  
 
 

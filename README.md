@@ -5,6 +5,8 @@ VEO is a docker container scheduler with built in DNS.
 This is a masterless cluster which syncs via Erlang OTP node connections and syncs data using
 Mnesia.
   
+![Erlang CI](https://github.com/nisbus/veo/workflows/Erlang%20CI/badge.svg)  
+  
 ## documentation   
   
 https://nisbus.github.io/veo/  

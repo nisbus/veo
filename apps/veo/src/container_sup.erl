@@ -42,7 +42,9 @@
 		      {error, term()} |
 		      ignore.
 start_link() ->
-    cleanup(),
+    %% TODO, Detect if VEO is running in a container
+    %% If it is we can't run the cleanup against VEO since it would kill it.
+%    cleanup(), 
     Name = list_to_atom(atom_to_list(erlang:node())++atom_to_list(?MODULE)),
     supervisor:start_link({global, Name}, ?MODULE, []).
 

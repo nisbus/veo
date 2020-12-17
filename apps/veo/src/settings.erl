@@ -247,4 +247,4 @@ get_protocol([_|Proto]) ->
 
 default_file() ->
     Dir = code:priv_dir(veo),
-    Dir++"/cluster.yml".
+    Dir++"/veo.yml".

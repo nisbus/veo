@@ -15,7 +15,8 @@
 -export([start_link/1]).
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-	 terminate/2, code_change/3, format_status/2]).
+	 terminate/2, code_change/3, format_status/2, stop/2,
+	 create/4]).
 
 -define(SERVER, ?MODULE).
 -include("../include/node.hrl").
@@ -24,7 +25,8 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-
+stop(CID, Pid) ->
+    gen_server:cast(Pid, [stop, CID]).
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server using the provided service record.
@@ -34,36 +36,23 @@
 		      {error, Error :: {already_started, pid()}} |
 		      {error, Error :: term()} |
 		      ignore.
-start_link(#service{name=Name, image=Image} = Service) ->
+start_link(#service{name=Name, image=Image, task=Task} = Service) ->
     lager:debug("Starting from Service ~p~n", [Service]),
-    Json = container_builder:build(Service),
-    lager:debug("Generated JSON ~p~n", [Json]),
-    Created = erldocker_api:post([containers, create], [{name, Name}] , Json),
-    lager:debug("Created container ~p~n", [Created]),
-    case Created of
-	{ok, [{_,Container}, {<<"Warnings">>, null}]} ->
-	    SafeId = to_atom_safe(Container),
-	    Res = gen_server:start_link({local, SafeId}, ?MODULE, [Service#service{id = Container}, false], []),
-	    check_assignment(Res, Service),
-	    Res;
-	{ok, [{_,Container}, {<<"Warnings">>, Warnings}]} ->
-	    lager:warning("Container created with warnings ~p~n", [Warnings]),
-	    SafeId = to_atom_safe(to_name(Container, Name, Image)),
-	    Res = gen_server:start_link({local, SafeId}, ?MODULE, [Service#service{id = Container}, false], []),
-	    check_assignment(Res, Service),
-	    Res;
-	{error, {Code, Error}} ->
-	    lager:error("Error creating container ~p~n", [Error]),
-	    {error, {Code, Error}};
-	{error, Error} ->
-	    {error, Error}
+    case Task of
+	undefined ->
+	    Json = container_builder:build(Service),
+	    lager:debug("Generated JSON ~p~n", [Json]),
+	    create(Name, Json, Image, Service);
+	_ ->
+	    % Make sure that tasks never restart and are removed on completion
+	    TaskNeverRestart = Service#service{restart=never, auto_remove=true},
+	    Json = container_builder:build(TaskNeverRestart),
+	    lager:debug("Generated JSON ~p~n", [Json]),	    
+	    erlcron:cron(Name, Task, {container_monitor, create, [Name,Json, Image, Service]})
     end.
-
-
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
-
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -165,8 +154,8 @@ handle_cast({status, Status}, State) ->
     lager:debug("Status changed ~p~n", Status),
     {noreply, State};
 
-handle_cast(monitor, #container{id=CID}=State) ->
-    docker_container:attach_stream_with_logs(CID, self()),
+handle_cast(monitor, #container{id=_CID}=State) ->
+%    docker_container:attach_stream_with_logs(CID, self()),
     {noreply, State};
 
 handle_cast(Request, State) ->
@@ -185,7 +174,7 @@ handle_cast(Request, State) ->
 			 {noreply, NewState :: term(), hibernate} |
 			 {stop, Reason :: normal | term(), NewState :: term()}.
 handle_info({_Pid, {data, _Data}}, #container{logs = _Logs} = State) when is_binary(_Data) ->
-    lager:info("Receiving stuff ~s~n", [binary_to_list(_Data)]),
+%    lager:info("Receiving binary log ~s~n", [binary_to_list(_Data)]),
     %% THIS EATS UP A LOT OF MEMORY MAKING THE SYSTEM UNUSABLE
     %% LogLine = io_lib:format("~s", [Data]),
     %% NewLogs = lists:append(LogLine, Logs),
@@ -193,7 +182,7 @@ handle_info({_Pid, {data, _Data}}, #container{logs = _Logs} = State) when is_bin
     {noreply, State};
 
 handle_info({_Pid, {data, _Data}}, #container{logs = _Logs} = State) ->
-    lager:info("Receiving stuff ~p~n", [_Data]),
+%    lager:info("Receiving log ~p~n", [_Data]),
     %% THIS EATS UP A LOT OF MEMORY MAKING THE SYSTEM UNUSABLE
     %% LogLine = io_lib:format("~s", [Data]),
     %% NewLogs = lists:append(LogLine, Logs),
@@ -207,7 +196,7 @@ handle_info({_Pid, {error, {Reason, Data}}}, State) ->
 
 handle_info({'EXIT', _Pid, Reason}, #container{service=Service, 
 					   restart_counter = Counter
-					  } = State) ->
+					  } = State) ->    
     case Service#service.restart of
 	restart ->
 	    lager:info("RESTARTING ~p, ~s, ~p~n", [Service, Reason, Counter]),
@@ -346,13 +335,15 @@ check_group(Container, Group) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec(register_dns(Container::#container{}) -> {tuple(), [#port{}]}).
-register_dns(#container{service=#service{id=CID, name=Name}=Service}) ->
+register_dns(#container{service=#service{id=CID, name=Name}=Service}=Container) ->
+    
     {IP, Ports} = case docker_container:container(CID) of 
 		      {ok, Inspect} ->			  
 			  #service{ports = PortList} = container_builder:parse_inspect(Inspect, Service),
 			  {get_container_ip(Service, Inspect), PortList};
 		      {error, Error} ->
-			  lager:error("Error getting container IP and ports ~p~n", [Error])
+			  lager:error("Error getting container IP and ports (retrying) ~p~n", [Error]),
+			  register_dns(Container)
 		  end,
     dns_registry:add_service(Name, CID, IP, Ports),
     {IP, Ports}.
@@ -493,6 +484,28 @@ restart(#container{pid=Pid,
 %% one_for_one: Stop only this.
 %% @end
 %%---------------------------------------------------------------------
+create(Name, Json, Image, Service) ->
+    Created = erldocker_api:post([containers, create], [{name, Name}] , Json),
+    lager:debug("Created container ~p~n", [Created]),
+    case Created of
+	{ok, [{_,Container}, {<<"Warnings">>, null}]} ->
+	    SafeId = to_atom_safe(Container),
+	    Res = gen_server:start_link({local, SafeId}, ?MODULE, [Service#service{id = Container}, false], []),
+	    check_assignment(Res, Service),
+	    Res;
+	{ok, [{_,Container}, {<<"Warnings">>, Warnings}]} ->
+	    lager:warning("Container created with warnings ~p~n", [Warnings]),
+	    SafeId = to_atom_safe(to_name(Container, Name, Image)),
+	    Res = gen_server:start_link({local, SafeId}, ?MODULE, [Service#service{id = Container}, false], []),
+	    check_assignment(Res, Service),
+	    Res;
+	{error, {Code, Error}} ->
+	    lager:error("Error creating container ~p~n", [Error]),
+	    {error, {Code, Error}};
+	{error, Error} ->
+	    {error, Error}	
+    end.
+
 -spec(stop(Container::#container{}) -> ok | {error, term()}).
 stop(#container{pid=Pid,
 	   service=#service{id=ID,

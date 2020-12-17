@@ -20,8 +20,7 @@
 %%-------------------------------------------------------------------
 -spec(build(Service::#service{}) -> binary()). 
 build(#service{
-	 environment=Env, 
-	 args=Command,
+	 environment=Env,	 
 	 image=Image,
 	 volumes=Volumes,
 	 memory=Memory,
@@ -32,17 +31,38 @@ build(#service{
 	 auto_remove=AutoRemove,
 	 labels=Labels,
 	 ports=Ports,
-	 healthcheck=HealthCheck
+	 healthcheck=HealthCheck,
+	 ulimits=ULimits,
+	 dns=Dns,
+	 command=Command,
+	 entrypoint=Entrypoint,
+	 task=Task
 	}) ->
-    B0 = [{<<"Image">>, list_to_binary(Image)},
+    B = [{<<"Image">>, list_to_binary(Image)},
 	  {<<"AttachStdout">>, false},
 	  {<<"AttachStderr">>, false}
 	 ],
+    BE = case Entrypoint of 
+	     undefined -> B;
+	     _ -> 
+		 lists:append(B, [{<<"Entrypoint">>, default_entrypoint(Entrypoint)}])
+	 end,
+    B0 = case ULimits of
+	     undefined ->
+		 BE;
+	     _ ->
+		 lists:append(BE, parse_ulimits(ULimits))
+	 end,
+    BDns = case Dns of 
+	       undefined ->
+		   B0;
+	       _ -> lists:append(B0, [{<<"Dns">>, lists:map(fun(D) -> list_to_binary(D) end, Dns)}])
+	   end,
     B1 = case default_command(Command) of
 	     undefined ->
-		 B0;
+		 BDns;
 	     Cmd ->
-		 lists:append(B0, [{<<"Cmd">>, Cmd}])
+		 lists:append(BDns, [{<<"Cmd">>, Cmd}])
 	 end,
     B2 = case HealthCheck of 
 	     undefined -> B1;
@@ -59,12 +79,14 @@ build(#service{
 		 lists:append(B1, Health)
 	 end,
 
+    
     EnvWithPorts = case Ports of
+		       #{} -> Env;
 		       [] -> Env;
 		       PortList ->
 			   {Count, PortEnvs} = lists:foldl(fun(#port{container_port = Container,
-								    host_port=_Host,
-								    random = IsZero}, Acc) ->
+								     host_port=_Host,
+								     random = IsZero}, Acc) ->
 								   case IsZero of
 								       false -> 
 									   Acc;
@@ -94,12 +116,13 @@ build(#service{
     		 end,
     
     H0 = [
-    	    {<<"Memory">>, default_memory(Memory)},
-    	    {<<"NetworkMode">>, default_network(Network)},				      
-    	    {<<"CpuCount">>, default_cpu(Cpu)},
-    	    {<<"AutoRemove">>, default_autoremove(AutoRemove)},
-    	    {<<"Privileged">>, default_privileged(Privileged)}
-    	   ],
+	  {<<"Memory">>, get_memory_from_service(Memory)},
+	  {<<"NetworkMode">>, default_network(Network)},				      
+	  {<<"CpuShares">>, default_cpu(Cpu)},
+	  {<<"CpuQuota">>, default_cpu_quota(Cpu)},
+	  {<<"AutoRemove">>, default_autoremove(AutoRemove)},
+	  {<<"Privileged">>, default_privileged(Privileged)}
+	 ],
     H1 = case default_volumes(Volumes) of
     	     undefined ->
     		 H0;
@@ -129,8 +152,15 @@ build(#service{
     		     WithPorts = lists:append(Host, [{<<"PortBindings">>, PortMapping}]),
     		     lists:append(LabelConfig, [{<<"HostConfig">>, WithPorts}])
     	     end,
-    io:format("Encoding ~p~n", [Config]),
-    jsx:encode(Config).
+    case Task of
+	undefined ->
+	    io:format("Encoding ~p~n", [Config]),
+	    jsx:encode(Config);
+	_->	    
+	    ConfigWithTask = lists:append(Config, Task),
+	    io:format("Encoding ~p~n", [ConfigWithTask]),
+	    jsx:encode(ConfigWithTask)
+    end.
 
 %%-------------------------------------------------------------------
 %% @doc
@@ -152,9 +182,12 @@ parse_inspect(Inspect, #service{ports=ServicePorts}) ->
     InspectName = proplists:get_value('Name', Inspect, undefined),
     Env = proplists:get_value(<<"Env">>, Config, []),
     Cmd = proplists:get_value(<<"Cmd">>, Config, proplists:get_value('Args', Inspect, "")),
-    Memory = proplists:get_value(<<"Memory">>, HostConfig, 0),
-    CPU = proplists:get_value(<<"CpuShares">>, HostConfig, 0),
+    Memory = parse_memory_from_inspect(proplists:get_value(<<"Memory">>, HostConfig, 0)),
+    CPU = parse_cpu_from_inspect(proplists:get_value(<<"CpuShares">>, HostConfig, 0)),
     Disk = proplists:get_value(<<"DiskQuota">>, HostConfig, 0),
+    ULimits = parse_ulimits_from_inspect(proplists:get_value(<<"ULimits">>, HostConfig, undefined)),
+    Dns = proplists:get_value(<<"Dns">>, HostConfig, undefined),
+    Entrypoint = proplists:get_value("Entrypoint", Config, undefined),
     Name = case TaskID of 
 	       undefined ->
 		   InspectName;
@@ -184,10 +217,13 @@ parse_inspect(Inspect, #service{ports=ServicePorts}) ->
        network_mode=NetworkMode,
        pid_mode=PidMode,
        environment=Env,
-       args=Cmd,
        cpus=CPU,
        memory=Memory,
-       disk=Disk
+       disk=Disk,
+       ulimits=ULimits,
+       dns=Dns,
+       command=Cmd,
+       entrypoint=Entrypoint
       }.
 
 %%-------------------------------------------------------------------
@@ -206,6 +242,42 @@ get_config(CID) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+parse_memory_from_inspect(0) ->
+    0;
+parse_memory_from_inspect(Memory) ->
+    Memory/1024/1024/1024.
+
+parse_cpu_from_inspect(0) ->
+    0;
+parse_cpu_from_inspect(Cpu) ->
+    Cpu/1024.
+
+parse_ulimits(undefined) ->
+    undefined;
+parse_ulimits(ULimits) ->
+    Mapped = lists:map(fun(#ulimits{name=Name, soft=Soft, hard=Hard}) ->
+			       [{<<"Name">>,list_to_binary(Name)}, {<<"Soft">>,Soft}, {<<"Hard">>,Hard}]
+		       end, ULimits),
+    [{<<"Ulimits">>, Mapped}].
+
+parse_ulimits_from_inspect(undefined) ->
+    undefined;
+parse_ulimits_from_inspect(ULimits) ->
+    lists:map(fun(Limit) ->
+		      #ulimits{name = proplists:get_value("Name", Limit),
+			       soft = proplists:get_value("Soft", Limit),
+			       hard = proplists:get_value("Hard", Limit)
+			       }
+		      end, ULimits).
+		      
+get_memory_from_service(undefined) ->
+    0;
+get_memory_from_service(Memory) when is_float(Memory) ->
+    get_memory_from_service(float_to_list(Memory, [{decimals,0}]));
+get_memory_from_service(Memory) when is_list(Memory) ->
+    get_memory_from_service(list_to_integer(Memory));
+get_memory_from_service(Memory) when is_integer(Memory) ->    
+    Memory*1024*1024*1024.
 
 get_test_command(undefined, _) ->
     [];
@@ -216,24 +288,50 @@ get_test_command(Cmd, true) ->
 get_test_command(Cmd, false) ->
     [<<"CMD">>, Cmd].
 
+default_entrypoint(E) ->
+    io:format("E ~p~n", [E]),
+    Entrypoint = case io_lib:latin1_char_list(E) of
+		     true ->
+			 [list_to_binary(E)];
+		     false ->
+			 lists:map(fun(En) ->
+					   list_to_binary(En)
+				   end, E)
+		 end,
+    Entrypoint.
+
 default_command([]) ->
     undefined;
 default_command(undefined) ->
     undefined;
 default_command(Cmd) ->
-    CommandList = lists:foldl(fun(C, Acc) ->
-				      Split = re:split(C, "=", [{return, list}]),
-				      Converted = lists:map(fun(E) ->
-								    list_to_binary(E)
-							    end, Split),
-				      lists:append(Acc, Converted)
-			      end, [], Cmd),
+    CommandList = case io_lib:latin1_char_list(Cmd) of
+		      true ->
+			  io:format("It's just a string ~n",[]),
+			  Split = re:split(Cmd, " ", [{return, list}]),
+			  lists:map(fun(E) ->
+					    list_to_binary(E)
+				    end,Split);
+		      false ->	    
+			  lists:foldl(fun(C, Acc) ->
+					      case lists:member("=", C) of
+						  true ->
+						      Split = re:split(C, "=", [{return, list}]),
+						      Converted = lists:map(fun(E) ->
+										    list_to_binary(E)
+							      end, Split),
+						      lists:append(Acc, Converted);
+						  false ->
+						      lists:append(Acc, list_to_binary(C))
+					      end
+				      end, [], Cmd)
+		  end,
     CommandList.
 
-default_memory(undefined) ->
-    0.0;
-default_memory(Memory) ->
-    Memory.
+%% default_memory(undefined) ->
+%%     0.0;
+%% default_memory(Memory) ->
+%%     Memory.
 
 default_pid(undefined) ->
     undefined;
@@ -250,9 +348,22 @@ default_network(_) ->
     <<"host">>.
 
 default_cpu(undefined) ->
-    0.0;
-default_cpu(Cpu) ->
-    Cpu.
+    0;
+default_cpu(Cpu) when is_float(Cpu) ->
+    default_cpu(float_to_list(Cpu, [{decimals,0}]));
+default_cpu(Cpu) when is_list(Cpu) ->
+    default_cpu(list_to_integer(Cpu));
+default_cpu(Cpu) when is_integer(Cpu) ->			 
+    Cpu*1024.
+
+default_cpu_quota(undefined) ->
+    0;
+default_cpu_quota(Cpu) when is_float(Cpu) ->
+    default_cpu_quota(float_to_list(Cpu, [{decimals,0}]));
+default_cpu_quota(Cpu) when is_list(Cpu) ->
+    default_cpu_quota(list_to_integer(Cpu));
+default_cpu_quota(Cpu) when is_integer(Cpu) ->			 
+    Cpu*100000.
 
 default_ports(#{}) ->
     #{};
@@ -310,27 +421,52 @@ default_volumes(Vol) ->
 			Split = re:split(Elem, ":", [{return,list}]),
 			[Container, Host, Opts] = case Split of
 						      [C, H] ->
-							  [C, H, <<"shared">>];
+							  [C, H, <<"rprivate">>];
 						      [C, H, Opt] ->
 							  [C, H, default_bind_opts(Opt)]
 						  end,
 			[[
-			 {<<"Target">>, list_to_binary(Container)},
-			 {<<"Source">>, list_to_binary(Host)},
-			 {<<"Type">>, <<"bind">>},
-			 {<<"BindOptions">>, [{<<"Propagation">>, default_bind_opts(Opts)}]}
+			  {<<"Target">>, list_to_binary(Container)},
+			  {<<"Source">>, list_to_binary(Host)},
+			  {<<"Type">>, <<"bind">>},
+			  {<<"Mode">>, default_bind_mode(Opts)},
+			  {<<"RW">>, is_rw(default_bind_mode(Opts))},
+			  {<<"BindOptions">>, [{<<"Propagation">>, default_bind_opts(Opts)}]}
 			] | Acc]
 		end,
 		[], Vol).
 
+default_bind_mode(undefined) ->
+    <<"rw">>;
+default_bind_mode(<<"rw">>) ->
+    <<"rw">>;
+default_bind_mode(<<"ro">>) ->
+    <<"ro">>;
+default_bind_mode(<<"rshared">>) ->
+    <<"rshared">>;
+default_bind_mode(Other) when is_list(Other) ->
+    list_to_binary(Other);
+default_bind_mode(Other) when is_binary(Other) ->
+    Other.
+
+
+is_rw(<<"rw">>) ->
+    true;
+is_rw(<<"">>) ->
+    true;
+is_rw(_) ->
+    false.
+
 default_bind_opts(undefined) ->
-    <<"shared">>;
+    <<"rprivate">>;
 default_bind_opts([]) ->
-    <<"shared">>;
+    <<"rprivate">>;
 default_bind_opts(Opt) when is_list(Opt) ->
     list_to_binary(Opt);
-default_bind_opts(Opt) when is_binary(Opt) ->
-    Opt.
+default_bind_opts(<<"rshared">>)->
+    <<"rshared">>;
+default_bind_opts(_)->
+    <<"rprivate">>.
 
 default_env([]) ->
     undefined;

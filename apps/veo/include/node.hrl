@@ -26,7 +26,7 @@
 -record(node_state, 
 	{
 	 node,
-	 role = undefined,
+	 roles = [],
 	 memory = #memory{},
 	 cpu = #cpu{},
 	 disk = #disk{},

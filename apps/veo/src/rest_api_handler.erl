@@ -53,9 +53,29 @@ handle_request(Req, #state{op=Op} = State) ->
 	    nodes ->
 		node_info(Req);
 	    container ->
-	        container(Req)
+	        container(Req);
+	    stop ->
+		stop(Req)
 	end,
     {ok, Rq, State}.
+
+%% Stops a container
+stop(Req) ->
+    Container = cowboy_req:binding(container, Req, undefined),
+    case Container of
+	undefined ->
+	    cowboy_req:reply(409, <<"No container specified">>, Req);
+	_ -> 
+	    case container_sup:stop_service(Container) of
+		{ok, stopped} ->
+		    cowboy_req:reply(200,
+			 <<"Stopped">>, 
+			 Req);
+		{error, Error} ->
+		    cowboy_req:reply(500, #{<<"content-type">> => <<"application/json">>}, 
+				     error_to_binary(Error), Req)
+	    end
+    end.
 
 node_info(Req) ->
     Node = cowboy_req:binding(node, Req, undefined),
@@ -175,7 +195,7 @@ to_json(Result) ->
     JSON = jsx:encode(Result),
     JSON.					 
 
-node_to_parse(#node_state{node=Node, role=Role, 
+node_to_parse(#node_state{node=Node, roles=Roles, 
 			  memory= #memory{
 				     used = UsedMem,
 				     available= AvailMem,
@@ -190,14 +210,26 @@ node_to_parse(#node_state{node=Node, role=Role,
 				 used=UsedDisk,
 				 available=AvailDisk,
 				 total=TotalDisk}}) ->
-    {N0, R0} = case Role of
+
+    
+    %% lists:foldl(fun(Role, Acc) ->
+    %% 		      case Role of 
+    %% 			  {N,R} ->
+			      
+    {N0, R0} = case Roles of
+		   {N,[R|[]]} ->
+		       {list_to_binary(atom_to_list(N)), list_to_binary(R)};
+		   {N, [H|T]} ->
+		       {list_to_binary(atom_to_list(N)), lists:map(fun(X) ->
+									   list_to_binary(X)
+								   end, [H]++T)};
 		   {N, R} -> {list_to_binary(atom_to_list(N)), list_to_binary(R)};
 		   _ -> 
-		       {list_to_binary(atom_to_list(Node)), list_to_binary(Role)}
-	       end,
+		       {list_to_binary(atom_to_list(Node)), list_to_binary(Roles)}
+	       end,	       
     [
      {<<"node">>, N0},
-     {<<"role">>, R0},
+     {<<"roles">>, R0},
      {<<"total_memory">>, TotalMem},
      {<<"used_memory">>, UsedMem},
      {<<"available_memory">>, AvailMem},
@@ -229,7 +261,10 @@ container_to_parse(#container{
 				environment=Env,
 				volumes=Vols,
 				ports=Ports,
-				args=Args,
+				command=Command,
+				entrypoint=Entrypoint,
+				ulimits=Ulimits,
+				dns=Dns,
 				auto_remove=AutoR,
 				group=Group,
 				group_role=GroupRole,
@@ -255,7 +290,10 @@ container_to_parse(#container{
      {<<"environment">>, lists:map(fun(E) -> possibly_list(E) end, Env)},
      {<<"volumes">>, Vols},
      {<<"ports">>, lists:map(fun(P) -> port_to_json(P) end, Ports)},
-     {<<"args">>, Args},
+     {<<"command">>, Command},
+     {<<"entrypoint">>, Entrypoint},
+     {<<"dns">>, Dns},
+     {<<"ulimits">>, Ulimits},
      {<<"auto_remove">>, AutoR},
      {<<"group">>, possibly_list(Group)},
      {<<"group_role">>, GroupRole},
@@ -324,7 +362,10 @@ json_to_service(JSON) ->
     Env = proplists:get_value(<<"environment">>, Decode, []),
     Vol = proplists:get_value(<<"volumes">>, Decode, []),
     Ports = json_to_ports(proplists:get_value(<<"ports">>, Decode, [])),
-    Args = proplists:get_value(<<"args">>, Decode, []),
+    Command = proplists:get_value(<<"command">>, Decode, []),
+    Entrypoint = proplists:get_value(<<"entrypoint">>, Decode, undefined),
+    Dns = proplists:get_value(<<"dns">>, Decode, undefined),
+    Ulimits = proplists:get_value(<<"ulimits">>, Decode, undefined),
     Remove = proplists:get_value(<<"auto_remove">>, Decode, false),
     Group = proplists:get_value(<<"group">>, Decode, undefined),
     GroupRole = proplists:get_value(<<"group_role">>, Decode, undefined),
@@ -346,7 +387,10 @@ json_to_service(JSON) ->
        environment=Env,
        volumes=Vol,
        ports= Ports,
-       args=Args,
+       command=Command,
+       entrypoint=Entrypoint,
+       dns=Dns,
+       ulimits=Ulimits,
        auto_remove=Remove,
        group=Group,
        group_role=GroupRole,

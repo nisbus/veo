@@ -135,7 +135,7 @@ matches_role_and_hosts(Node, _, Hosts, []) when is_list(Hosts) ->
 	    true
     end;
 matches_role_and_hosts(_, Role, _, Roles) when is_list(Roles) ->
-    case lists:filter(fun(X) ->
+    case lists:any(fun(X) ->
 			 Role =:= X
 		 end, Roles) of
 	[] ->
@@ -166,8 +166,8 @@ get_resources() ->
 %%--------------------------------------------------------------------
 -spec(available() -> {atom(), float(), float(), float(), {atom(), string()}}).
 available() ->
-    #node_state{memory=#memory{available=Mem}, cpu=#cpu{count=CPU}, disk=#disk{available=Disk}, role=Role} = get_resources(),
-    {erlang:node(), CPU, Mem, Disk, Role}.
+    #node_state{memory=#memory{available=Mem}, cpu=#cpu{count=CPU}, disk=#disk{available=Disk}, roles=Roles} = get_resources(),
+    {erlang:node(), CPU, Mem, Disk, Roles}.
     
 %%--------------------------------------------------------------------
 %% @doc
@@ -179,15 +179,15 @@ free() ->
     #node_state{memory=#memory{available=Mem}, 
 		cpu=#cpu{count=CPU}, 
 		disk=#disk{available=Disk},
-		role=Role,
+		roles=Roles,
 		allocated=#allocation{
 			    cpu=AllocCPU,
 			    disk=AllocDisk,
 			    memory=AllocMem}
 	       } = get_resources(),
-    case Role of
+    case Roles of
 	{_Name, _Role} ->
-	    {erlang:node(), CPU-AllocCPU, Mem-AllocMem, Disk-AllocDisk, Role};
+	    {erlang:node(), CPU-AllocCPU, Mem-AllocMem, Disk-AllocDisk, Roles};
 	_ -> 
 	    {erlang:node(), CPU-AllocCPU, Mem-AllocMem, Disk-AllocDisk, {erlang:node(),""}}
     end.
@@ -240,11 +240,11 @@ init([]) ->
     self() ! refresh,
     timer:send_interval(10000, refresh),
 %    Node = create_call_name(erlang:node()),
-    Role = settings:get_role(erlang:node()),
+    Roles = settings:get_roles(erlang:node()),
     
     {ok, #node_state{
 	    node=erlang:node(),
-	    role=Role,
+	    roles=Roles,
 	    connected=[]
 	   }
     }.
@@ -308,6 +308,8 @@ handle_cast({allocate, #allocation{cpu=CPU, memory=Memory, disk=Disk}},
 	       }
     };
 
+handle_cast({role, Role}, State) ->
+    {noreply, State#node_state{roles=State#node_state.roles++Role}};
 
 handle_cast(_Request, State) ->
     lager:warning("Unhandled cast ~p - ~p~n", [_Request, State]),
@@ -359,28 +361,46 @@ handle_info(refresh, State) ->
     {noreply, NewState};
 
 handle_info({nodedown, Node}, State) ->
-    Containers = container_storage:containers_for_node(Node),
-    case Containers of
-	[] ->
-	    lager:debug("Node ~p went down with no containers", [Node]);
-	_ ->
-	    lager:debug("Node ~p went down, rescheduling containers"),
-	    spawn(fun() ->
-			  StartResults = lists:map(fun(#container{service=Service}) ->
-							   case Service#service.restart of
-							       restart ->
-								   container_sup:add_service(Service);
-							       _ ->
-								   {"No restart", Service#service.name}
-							   end
-						   end, Containers),
-			  lager:debug("Rescheduled containers ~p~n", [StartResults])
-		  end)
-    end,
+    F = fun() ->
+		Nodes = [[erlang:node()]++erlang:nodes()],
+		mnesia:lock({global, {table, containers}, Nodes}, write),
+		Containers = container_storage:containers_for_node(Node),
+		case Containers of
+		    [] ->
+			lager:debug("Node ~p went down with no containers", [Node]);
+		    _ ->
+			lager:debug("Node ~p went down, rescheduling containers"),
+			lists:foreach(fun(#container{id=CID}) ->
+					      container_storage:remove_container(CID)
+				      end, Containers),
+			spawn(fun() ->
+				      StartResults = lists:map(fun(#container{service=Service}=Container) ->
+								       case Service#service.restart of
+									   restart ->
+									       case container_sup:add_service(Service) of
+										   {ok, _} ->
+										       {ok, Service#service.name};
+										   _ -> 
+										       lager:debug("Failed to move service ~p~n", [Service#service.name]),
+										       container_storage:save_container(Container),
+										       {failed_restart, Service#service.name}										   
+									       end;									       
+									   _ ->								
+									       {no_restart, Service#service.name}
+								       end
+							       end, Containers),
+				      lager:debug("Rescheduled containers ~p~n", [StartResults])
+			      end)    			    
+		end
+	end,
+    mnesia:activity(transaction, F),
     {noreply, State};
 
 handle_info({nodeup, Node}, State) ->
     lager:debug("New node detected ~p~n",[Node]),
+    mnesia:change_config(extra_db_nodes, erlang:nodes()),
+    WaitResult = mnesia:wait_for_tables([containers], 10000),
+    lager:debug("Updated extra_db_nodes ~p~n", [WaitResult]),
     {noreply, State};
 
 handle_info(_Info, State) ->

@@ -1,0 +1,8 @@
+*.beam
+_build/docs
+_build/test
+MnesiaCore*
+*.crashdump
+*.log
+*.dump
+*.dag

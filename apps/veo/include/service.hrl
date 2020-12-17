@@ -13,6 +13,12 @@
 		      retries = 0 :: integer(),
 		      shell = false :: boolean()
 		     }).
+-record(ulimits, {
+		  name :: string(),
+		  hard :: integer(),
+		  soft :: integer()
+		 }).
+
 -record(service, {
 		  id,
 		  name :: string(),
@@ -24,6 +30,7 @@
 		  pid_mode,
 		  roles = [],
 		  hosts = [],
+		  instances = 1 :: integer | all,
 		  cpus = 0.0 :: float(),
 		  memory = 0.0 :: float(),
 		  disk = 0.0 :: float(),
@@ -31,10 +38,14 @@
 		  environment = [],
 		  volumes = [],
 		  ports = [] :: [#{} | #port{}],
-		  args = [],
+		  ulimits = undefined :: undefined | [#ulimits{}],
 		  auto_remove = false :: boolean(),
 		  group = undefined :: atom(),
 		  group_role = undefined :: master|slave|undefined,
 		  group_policy = undefined :: master_kills_all|one_kills_all|one_for_one|undefined,
-		  healthcheck = undefined :: undefined | #healthcheck{}
+		  healthcheck = undefined :: undefined | #healthcheck{},
+		  dns = undefined :: undefined | string(),
+		  command=undefined,
+		  entrypoint=undefined,
+		  task = undefined :: undefined | any() % Tasks are defined with Erlcron syntax
 		 }).

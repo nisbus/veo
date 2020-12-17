@@ -28,18 +28,19 @@ start_link() ->
     Dispatch = cowboy_router:compile([
     				      {'_', 
     				       [
-    					{"/", cowboy_static, {priv_file, volta_scheduler, "veo-ui/dist/veo-ui/index.html"}},
+    					{"/", cowboy_static, {priv_file, veo, "veo-ui/dist/veo-ui/index.html"}},
     					{"/data", ui_handler,[]},
 					{"/api/container/:container", rest_api_handler, [container]},
 					{"/api/container", rest_api_handler, [container]},
 					{"/api/containers", rest_api_handler, [containers]},
 					{"/api/containers/:node", rest_api_handler, [containers]},
+					{"/api/containers/stop/:container", rest_api_handler, [stop]},
 					{"/api/nodes/:node", rest_api_handler, [nodes]},
 					{"/api/nodes", rest_api_handler, [nodes]},
     					{"/websocket", websocket_handler, []},
     					{"/[...]", cowboy_static, {priv_dir, veo, "veo-ui/dist/veo-ui"}}
     				       ]}]),
-    {ok, _} = cowboy:start_clear(volta_http_listener,
+    {ok, _} = cowboy:start_clear(veo_http_listener,
         [{port, 8086}],
         #{env => #{dispatch => Dispatch}}
     ),

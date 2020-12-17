@@ -9,7 +9,7 @@
 %%% Created :  19 Jun 2020 by nisbus <nisbus@gmail.com>
 %%%-------------------------------------------------------------------
 -module(settings).
--export([get_nodes/0, get_nodes/1, get_applications/0, get_applications/1, get_application/2, get_role/1, parse_service/1]).
+-export([get_nodes/0, get_nodes/1, get_applications/0, get_applications/1, get_application/2, get_roles/1, parse_service/1]).
 -include("../include/container.hrl").
 
 %%--------------------------------------------------------------------
@@ -29,6 +29,7 @@ get_nodes() ->
 -spec get_nodes(File::string()) -> [{atom(), string()}].
 get_nodes(File) ->
     [Parsed] = yamerl_constr:file(File),
+    io:format(user, "Parsed ~p~n", [Parsed]),
     Nodes = proplists:get_value("nodes", Parsed),
     lists:foldl(fun([{_, Node}, {_, Role}], Acc) ->
 			[{list_to_atom(Node), Role} | Acc]
@@ -39,8 +40,8 @@ get_nodes(File) ->
 %% Gets the role for a specific node.
 %% @end
 %%--------------------------------------------------------------------
--spec get_role(atom()) -> undefined | binary().			 
-get_role(Node) ->
+-spec get_roles(atom()) -> undefined | binary().			 
+get_roles(Node) ->
     Nodes = get_nodes(),
     Role = lists:filter(fun({N, _R}) ->
 				Node =:= N
@@ -100,6 +101,8 @@ parse_service(Service) ->
     NetworkMode = proplists:get_value("network_mode", Settings, undefined),
     PidMode = proplists:get_value("pid_mode", Settings, undefined),
     Privileged = proplists:get_value("privileged", Settings, false),
+    Command = proplists:get_value("command", Settings, undefined),
+    EntryPoint = proplists:get_value("entrypoint", Settings, undefined),
     CPU = proplists:get_value("cpus", Settings, 0),
     Disk = proplists:get_value("disk", Settings, 0),
     Memory = proplists:get_value("memory", Settings, 0),
@@ -112,37 +115,50 @@ parse_service(Service) ->
     GroupRole = proplists:get_value("group_role", Settings, undefined),
     GroupPolicy = proplists:get_value("group_policy", Settings, undefined),
     Ports = parse_ports(proplists:get_value("ports", Settings, #{})),
-    Args = proplists:get_value("args", Settings, undefined),
     AutoRemove= proplists:get_value("auto_remove", Settings, false),
     HealthCheck = parse_health_check(proplists:get_value("health_check", Settings, undefined)),
+    Instances = parse_instances(proplists:get_value("instances", Settings, 1)),
+    ULimits = parse_ulimits(proplists:get_value("ulimits", Settings, undefined)),
+    Dns = proplists:get_value("dns", Settings, undefined),
     S = #service{
-       name=Name,
-       image=Image,
-       restart=Restart,
-       restart_count=RestartCount,
-       privileged=Privileged,
-       network_mode=NetworkMode,
-       pid_mode=PidMode,
-       roles=Roles,
-       hosts=Hosts,
-       cpus=CPU,
-       memory=Memory,
-       disk=Disk,
-       labels=Labels,
-       environment=Env,
-       volumes=Vols,
-       ports=Ports,
-       args=Args,
-       auto_remove=AutoRemove,
-       group=Group,
-       group_policy=GroupPolicy,
-       group_role=GroupRole,
-	   healthcheck=HealthCheck},
+	   name=Name,
+	   image=Image,
+	   restart=Restart,
+	   restart_count=RestartCount,
+	   privileged=Privileged,
+	   network_mode=NetworkMode,
+	   pid_mode=PidMode,
+	   roles=Roles,
+	   hosts=Hosts,
+	   cpus=CPU,
+	   memory=Memory,
+	   disk=Disk,
+	   labels=Labels,
+	   environment=Env,
+	   volumes=Vols,
+	   ports=Ports,
+	   auto_remove=AutoRemove,
+	   group=Group,
+	   group_policy=GroupPolicy,
+	   group_role=GroupRole,
+	   healthcheck=HealthCheck,
+	   instances=Instances,
+	   ulimits=ULimits,
+	   dns=Dns,
+	   command=Command,
+	   entrypoint=EntryPoint},
     T = is_record(S, service),
     io:format(user, "Parsed to service record ~p~n",[T]),
     S.
     
     
+parse_instances("all") ->
+    all;
+parse_instances(Int) when is_integer(Int) ->
+    Int;
+parse_instances(Int) when is_list(Int) ->
+    list_to_integer(Int).
+
 parse_restart("on-failure") ->
     restart;
 parse_restart("never") ->
@@ -170,6 +186,13 @@ parse_health_check(HealthCheck) ->
        shell=Shell
       }.
     
+parse_ulimits(undefined) ->
+    undefined;
+parse_ulimits(ULimits) when is_list(ULimits) ->
+    lists:map(fun({Name, [{"soft", Soft}, {"hard", Hard}]}) ->
+		      #ulimits{name=Name, soft=Soft, hard=Hard}
+	      end, ULimits).
+   
 -spec parse_ports(#{} | binary()) -> #{} | [#port{}].
 parse_ports(#{}) ->
     #{};
@@ -177,11 +200,15 @@ parse_ports(Ports) ->
     lists:foldl(fun(Elem, Acc) ->
 			[{Item, PortList}] = Elem,
 			PortProps = lists:flatten(PortList),
-			Proto = get_protocol(proplists:get_value("protocol", PortProps)),
+			Proto = get_protocol(proplists:get_value("protocol", PortProps, undefined)),
 			HostPort = proplists:get_value("host_port", PortProps),
-			ContainerPort= proplists:get_value("container_port", PortProps),
 			Name = proplists:get_value("name", PortProps, Item),
-
+			ContainerPort = case is_list(proplists:get_value("container_port", PortProps)) of
+					    true ->
+						list_to_integer(proplists:get_value("container_port", PortProps));
+					    false ->
+						proplists:get_value("container_port", PortProps)
+					end,
 			{Port, IsZero} = case HostPort of
 					     "0" ->
 						 {ok, Listen} = gen_tcp:listen(0, []),
@@ -189,11 +216,16 @@ parse_ports(Ports) ->
 						 gen_tcp:close(Listen),
 						 {P, true};
 					     _ ->
-						 {list_to_integer(HostPort), false}
+						 case is_list(HostPort) of 
+						     true ->
+							 {list_to_integer(HostPort), false};
+						     false ->
+							 {HostPort, false}
+						 end
 					 end,
 			lists:append(Acc, [#port{
 					      host_port = Port,
-					      container_port = list_to_integer(ContainerPort),
+					      container_port = ContainerPort,
 					      protocol = Proto,
 					      random = IsZero,
 					      name = Name

@@ -15,6 +15,7 @@
 %% API
 -export([start_link/0]).
 -export([add_service/1, 
+	 stop_service/1,
 	 count/0, 
 	 list_containers/0, 
 	 get_containers/0, 
@@ -26,43 +27,44 @@
 -define(SERVER, ?MODULE).
 -include("../include/container.hrl").
 
-%%%===================================================================
-%%% API functions
-%%%===================================================================
+%% %%%===================================================================
+%% %%% API functions
+%% %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Starts the supervisor
-%% @end
-%%--------------------------------------------------------------------
+%% %%--------------------------------------------------------------------
+%% %% @doc
+%% %% Starts the supervisor
+%% %% @end
+%% %%--------------------------------------------------------------------
 -spec start_link() -> {ok, Pid :: pid()} |
 		      {error, {already_started, Pid :: pid()}} |
 		      {error, {shutdown, term()}} |
 		      {error, term()} |
 		      ignore.
 start_link() ->
+    cleanup(),
     Name = list_to_atom(atom_to_list(erlang:node())++atom_to_list(?MODULE)),
     supervisor:start_link({global, Name}, ?MODULE, []).
 
-%%%===================================================================
-%%% Supervisor callbacks
-%%%===================================================================
+%% %%%===================================================================
+%% %%% Supervisor callbacks
+%% %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Whenever a supervisor is started using supervisor:start_link/[2,3],
-%% this function is called by the new process to find out about
-%% restart strategy, maximum restart intensity, and child
-%% specifications.
-%% @end
-%%--------------------------------------------------------------------
+%% %%--------------------------------------------------------------------
+%% %% @private
+%% %% @doc
+%% %% Whenever a supervisor is started using supervisor:start_link/[2,3],
+%% %% this function is called by the new process to find out about
+%% %% restart strategy, maximum restart intensity, and child
+%% %% specifications.
+%% %% @end
+%% %%--------------------------------------------------------------------
 -spec init(Args :: term()) ->
 		  {ok, {SupFlags :: supervisor:sup_flags(),
 			[ChildSpec :: supervisor:child_spec()]}} |
 		  ignore.
 init([]) ->
-    cleanup(),
+%    cleanup(),
     Spec = {container_monitor, 
 	    {container_monitor, start_link, []},
 	    temporary, brutal_kill, worker, [container_monitor]},
@@ -81,13 +83,13 @@ init([CID]) when is_list(CID) ->
     {ok, {{simple_one_for_one, 0, 1}, [Spec]}}.
 
 
-%%------------------------------------------------------------------------------
-%% @doc
-%% Add a service to the scheduler.
-%% The scheduler will find the appropriate node/s to run the service.
-%% 
-%% @end
-%%------------------------------------------------------------------------------    
+%% %%------------------------------------------------------------------------------
+%% %% @doc
+%% %% Add a service to the scheduler.
+%% %% The scheduler will find the appropriate node/s to run the service.
+%% %% 
+%% %% @end
+%% %%------------------------------------------------------------------------------    
 -spec(add_service(Service::#service{}) -> {ok, started} | {error, term()}).
 add_service(#service
 	    {
@@ -96,26 +98,56 @@ add_service(#service
 	      hosts=Hosts,
 	      cpus=CPU,
 	      memory=Memory,
-	      disk=Disk
+	      disk=Disk,
+	      instances=Instances
 	    } = Service) ->
-    Available = node_monitor:where(CPU, Memory, Disk, Hosts, Roles, Group),
+    Available = node_monitor:where(CPU, Memory, Disk, Hosts, Roles, Group),    
     case Available of 
 	[] ->
 	    {error, no_suitable_node};
 	[{N, _, _, _, _}|_] ->
-	    Where = list_to_atom(atom_to_list(N)++atom_to_list(?MODULE)),
-	    Supervisor = global:whereis_name(Where),
-	    lager:debug("Starting child on ~p, PID=~p~n", [N, Supervisor]),
-	    Result = supervisor:start_child(Supervisor, [Service]),
-	    lager:debug("Started ~p~n", [Result]),
-	    Result
+	    case Instances of
+		all ->
+		    lists:map(fun({Node, _, _, _, _}) ->
+				      run_on_node(Node, Service)
+			      end, Available);
+		1 ->
+		    run_on_node(N, Service);
+		Count ->
+		    run_on_node(Available, Service, Count+1)
+	    end
     end;
-add_service(Service) ->
-    lager:debug("Received service ~p~n", [Service]),
-    Match = is_record(Service, service),
-    io:format(user, "Is record ~p~n~p", [Match, Service]).
-    
 
+add_service(Service) ->
+    io:format("Why ~p~n", [Service]).
+
+run_on_node(Nodes, Service, 0) ->
+    {Node,_,_,_,_} = lists:nth(1, Nodes),
+    run_on_node(Node,Service);    
+run_on_node(Nodes, Service, Count) ->
+    {Node,_,_,_,_} = lists:nth(Count, Nodes),
+    run_on_node(Node,Service),
+    run_on_node(Nodes, Service, Count-1).
+	
+run_on_node(Node, Service) ->
+    Where = list_to_atom(atom_to_list(Node)++atom_to_list(?MODULE)),
+    Supervisor = global:whereis_name(Where),
+    Result = case Supervisor of
+		 undefined ->
+		     "Not able to start service "++atom_to_list(Node);
+		 _ ->
+		     supervisor:start_child(Supervisor, [Service])
+	     end,
+    Result.
+    
+stop_service(Container) ->
+    Services = container_storage:containers_by_service_name(Container),
+    lists:map(fun(#container{id=CID, node=Node
+			    , pid=Pid}) ->
+		      rpc:call(Node, container_monitor, stop, [CID, Pid])
+	      end, Services).
+
+    
 
 %%------------------------------------------------------------------------------
 %% @doc

@@ -44,7 +44,6 @@ create_container_table() ->
 	    case mnesia:create_table(containers,
 				     [{attributes, record_info(fields, container)},
 				      {record_name, container},
-
 				      {?COPIES, [node()]},
 				      {type, bag}
 				     ]) of
@@ -53,11 +52,18 @@ create_container_table() ->
 		{atomic, ok} ->
 		    ok;
 		Error ->
+		    lager:debug("Error creating container table ~p~n", [Error]),
 		    Error
 	    end;
 	_ ->	    
 	    mnesia:change_config(extra_db_nodes, Connected),
-	    mnesia:wait_for_tables([containers], 5000)
+	    case mnesia:wait_for_tables([containers], 100000) of
+		{timeout, _} ->
+		    create_container_table(),
+		    lager:warning("Timeout waiting for containers table, retrying...");
+		WaitResult ->
+		    lager:debug("Containers from other node ~p~n", [WaitResult])
+	    end
     end.
 
 %%--------------------------------------------------------------------

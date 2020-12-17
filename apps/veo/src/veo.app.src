@@ -10,7 +10,6 @@
     observer,
     stdlib,
     syntax_tools,
-    mimetypes,
     sasl,
     mnesia,
     hackney,

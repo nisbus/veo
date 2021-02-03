@@ -237,7 +237,12 @@ get_config(CID) ->
     {ok, Inspect} = docker_container:container(CID),
     InspectName = proplists:get_value('Name', Inspect, undefined),
     Container = settings:get_application(InspectName),
-    parse_inspect(Inspect, Container).
+    Return = case Container of 
+		 [] ->
+		     parse_inspect(Inspect, #service{});
+		 _ -> parse_inspect(Inspect, Container)
+	     end,
+    Return.
 
 %%%===================================================================
 %%% Internal functions
@@ -492,6 +497,19 @@ default_labels(Labels) ->
 
 parse_ports(null, _) ->
     [];
+parse_ports(Ports, []) ->
+    lists:foldl(fun(Port, Acc) ->
+			{ContainerAndProto, [[_,{_,HostPort}]]} = Port,
+			Split = binary:split(ContainerAndProto, <<"/">>),
+			BasePort = case Split of
+				       [CPort, Proto] ->
+					   #port{container_port=binary_to_integer(CPort), protocol=get_protocol(Proto), host_port=binary_to_integer(HostPort)};
+				       [CPort|[]] ->
+					   #port{container_port=binary_to_integer(CPort), protocol=tcp, host_port=binary_to_integer(HostPort)}
+				   end,
+			Acc++[BasePort]
+		end, [], Ports);
+    
 parse_ports(Ports, ServicePorts) ->
     lists:foldl(fun(Port, Acc) ->
 			{ContainerAndProto, [[_,{_,HostPort}]]} = Port,

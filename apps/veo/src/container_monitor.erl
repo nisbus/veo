@@ -32,24 +32,30 @@ stop(CID, Pid) ->
 %% Starts the server using the provided service record.
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(Service::#service{}) -> {ok, Pid :: pid()} |
+-spec start_link(Service::#service{}|term()) -> {ok, Pid :: pid()} |
 		      {error, Error :: {already_started, pid()}} |
 		      {error, Error :: term()} |
 		      ignore.
 start_link(#service{name=Name, image=Image, task=Task} = Service) ->
-    lager:debug("Starting from Service ~p~n", [Service]),
     case Task of
 	undefined ->
 	    Json = container_builder:build(Service),
-	    lager:debug("Generated JSON ~p~n", [Json]),
 	    create(Name, Json, Image, Service);
 	_ ->
 	    % Make sure that tasks never restart and are removed on completion
 	    TaskNeverRestart = Service#service{restart=never, auto_remove=true},
 	    Json = container_builder:build(TaskNeverRestart),
-	    lager:debug("Generated JSON ~p~n", [Json]),	    
 	    erlcron:cron(Name, Task, {container_monitor, create, [Name,Json, Image, Service]})
-    end.
+    end;
+
+start_link(CID) when is_binary(CID) ->
+    SafeId = to_atom_safe(CID),
+    Service = container_builder:get_config(CID),
+    Res = gen_server:start_link({local, SafeId}, ?MODULE, [Service#service{restart=never, id=CID}, true], []),
+    check_assignment(Res, Service),
+    Res.
+    
+
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -66,7 +72,6 @@ start_link(#service{name=Name, image=Image, task=Task} = Service) ->
 			      ignore.
 init([#service{id=ContainerID, healthcheck=HealthCheck} = Service, Exists]) ->
     process_flag(trap_exit, true),
-    lager:debug("STARTING ~p~n", [ContainerID]),
     case Exists of
 	true ->
 	    gen_server:cast(self(), monitor);
@@ -154,9 +159,16 @@ handle_cast({status, Status}, State) ->
     lager:debug("Status changed ~p~n", Status),
     {noreply, State};
 
-handle_cast(monitor, #container{id=_CID}=State) ->
-%    docker_container:attach_stream_with_logs(CID, self()),
-    {noreply, State};
+handle_cast(monitor, #container{id=CID, service=#service{name=Name}}=State) ->
+    Stats = erldocker_api:get([containers, CID, stats], [{stream, false}]),
+    NewState = case parse_stats(Stats) of
+		   {ok, Parsed} -> State#container{stats=Parsed};
+		   {error, Error} -> 
+		       lager:warning("Error getting stats for service ~p, ~p~n", [Name, Error]),
+		       State
+	       end,
+    timer:apply_after(10000, ?MODULE, handle_cast, [monitor, State]),    
+    {noreply, NewState};
 
 handle_cast(Request, State) ->
     lager:warning("Unexpected message in monitor cast ~p~n", Request),
@@ -645,3 +657,31 @@ to_atom(CID) when is_list(CID) ->
 to_atom(CID) ->
     {invalid_name, CID}.
 
+parse_stats({error, Error}) ->
+    {error, Error};
+parse_stats({ok, Stats}) ->
+    Read = proplists:get_value(<<"read">>, Stats, undefined),
+    MemoryStats = proplists:get_value(<<"memory_stats">>, Stats),
+    CPU = proplists:get_value(<<"cpu_stats">>, Stats),
+    PreCPU = proplists:get_value(<<"precpu_stats">>, Stats),
+    {ok, #stats{memory = get_memory_percentage(MemoryStats),
+	   cpu= get_cpu_percentage(CPU, PreCPU),
+	   timestamp=Read}}.
+
+get_memory_percentage(Memory) ->    
+    Usage = proplists:get_value(<<"usage">>, Memory),
+    Cache = proplists:get_value(<<"cache">>, proplists:get_value(<<"stats">>, Memory)),
+    Available = proplists:get_value(<<"limit">>, Memory),
+    Percentage = ((Usage-Cache)/Available) *100.0,
+    #container_memory{used=Percentage, available=Available}.
+
+get_cpu_percentage(CPU, PreCPU) ->
+    CurrentUsage = proplists:get_value(<<"cpu_usage">>, CPU),
+    PreviousUsage = proplists:get_value(<<"cpu_usage">>, PreCPU),
+    Delta = proplists:get_value(<<"total_usage">>, CurrentUsage) - proplists:get_value(<<"total_usage">>, PreviousUsage),
+    CPUCount = proplists:get_value(<<"online_cpus">>, CPU),
+    SystemUsage = proplists:get_value(<<"system_cpu_usage">>, CPU),
+    SystemPrevious = proplists:get_value(<<"system_cpu_usage">>, PreCPU),
+    SystemDelta =  SystemUsage - SystemPrevious,    
+    Percentage = (Delta / SystemDelta) * CPUCount * 100.0,
+    #container_cpu{count=CPUCount, used=Percentage}.

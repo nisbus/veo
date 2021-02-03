@@ -24,7 +24,6 @@
 
 init(Req, Opts) ->
     [Op | _] = Opts,
-    lager:debug("Init REST ~p, Req ~p", [Op, Req]),
     State = #state{op=Op},
     {cowboy_rest, Req, State}.
 
@@ -55,7 +54,9 @@ handle_request(Req, #state{op=Op} = State) ->
 	    container ->
 	        container(Req);
 	    stop ->
-		stop(Req)
+		stop(Req);
+	    resources ->
+		resources(Req)	    
 	end,
     {ok, Rq, State}.
 
@@ -77,6 +78,40 @@ stop(Req) ->
 	    end
     end.
 
+resources(Req) ->
+    {AllResources,_} = rpc:multicall(node_monitor, get_resources, []),
+    Nodes = lists:map(fun(#node_state{node=Name, cpu=#cpu{used=UsedCPU},
+				  memory=#memory{used=UsedMemory, total=TotalMemory},
+				  disk=#disk{used=UsedDisk, total=TotalDisk}}) ->
+			   [{<<"node">>, Name},
+			    {<<"cpu">>, UsedCPU},
+			    {<<"memory">>, (UsedMemory/TotalMemory)*100},
+			    {<<"disk">>, (UsedDisk/TotalDisk)*100}
+			   ]
+		      end, AllResources),
+    {AllContainers,_X} = rpc:multicall([node()]++nodes(), container_sup, list_containers, []),
+    Containers = lists:foldl(fun(C0, Acc) ->
+    				 Acc ++ lists:map(fun(#container{id=Id, service=#service{name=Name},
+								 stats=#stats{
+									  cpu=#container_cpu{used=UsedCPU},
+									  memory=#container_memory{used=UsedMem}
+									 }}) ->
+							  [
+							   {<<"id">>, Id},
+							   {<<"name">>, Name},
+							   {<<"cpu">>, UsedCPU},
+							   {<<"memory">>, UsedMem}
+							  ]
+    						  end, C0)
+    			 end, [], AllContainers),
+    cowboy_req:reply(200, 
+		     #{<<"content-type">> => <<"application/json">>}, 
+		     to_json([{<<"nodes">>, Nodes},
+			     {<<"services">>, Containers}]), 
+		     Req).
+    
+
+    
 node_info(Req) ->
     Node = cowboy_req:binding(node, Req, undefined),
     case Node of 
@@ -191,9 +226,7 @@ error_to_binary(Error) when is_atom(Error) ->
     
 			      
 to_json(Result) ->
-    lager:debug("Encoding result ~p", [Result]),
-    JSON = jsx:encode(Result),
-    JSON.					 
+    jsx:encode(Result).			 
 
 node_to_parse(#node_state{node=Node, roles=Roles, 
 			  memory= #memory{
@@ -242,34 +275,39 @@ node_to_parse(#node_state{node=Node, roles=Roles,
     ].
 
 container_to_parse(#container{
-		     restart_counter=Restarts,
-		     status=Status,
-		     ip_address=IP,
-		     service=#service{
-				id=ID,
-				name=Name,
-				restart=Restart,
-				privileged=Priv,
-				network_mode=Network,
-				pid_mode=Pid,
-				roles=Roles,
-				hosts=Hosts,
-				cpus=Cpu,
-				memory=Mem,
-				disk=Disk,
-				labels=Labels,
-				environment=Env,
-				volumes=Vols,
-				ports=Ports,
-				command=Command,
-				entrypoint=Entrypoint,
-				ulimits=Ulimits,
-				dns=Dns,
-				auto_remove=AutoR,
-				group=Group,
-				group_role=GroupRole,
-				group_policy=Policy,
-				healthcheck=HealthCheck
+		      restart_counter=Restarts,
+		      status=Status,
+		      ip_address=IP,
+		      stats=#stats{
+			       cpu=#container_cpu{used=UseCPU},
+			       memory=#container_memory{used=UseMem},
+			       timestamp=Timestamp
+			      },
+		      service=#service{
+				 id=ID,
+				 name=Name,
+				 restart=Restart,
+				 privileged=Priv,
+				 network_mode=Network,
+				 pid_mode=Pid,
+				 roles=Roles,
+				 hosts=Hosts,
+				 cpus=Cpu,
+				 memory=Mem,
+				 disk=Disk,
+				 labels=Labels,
+				 environment=Env,
+				 volumes=Vols,
+				 ports=Ports,
+				 command=Command,
+				 entrypoint=Entrypoint,
+				 ulimits=Ulimits,
+				 dns=Dns,
+				 auto_remove=AutoR,
+				 group=Group,
+				 group_role=GroupRole,
+				 group_policy=Policy,
+				 healthcheck=HealthCheck
 			       }}) ->
     [
      {<<"name">>, possibly_list(Name)},
@@ -286,7 +324,7 @@ container_to_parse(#container{
      {<<"cpus">>, Cpu},
      {<<"memory">>, Mem},
      {<<"disk">>, Disk},
-     {<<"labels">>, lists:map(fun(L) -> possibly_list(L) end, Labels)},
+     {<<"labels">>, Labels},
      {<<"environment">>, lists:map(fun(E) -> possibly_list(E) end, Env)},
      {<<"volumes">>, Vols},
      {<<"ports">>, lists:map(fun(P) -> port_to_json(P) end, Ports)},
@@ -298,7 +336,10 @@ container_to_parse(#container{
      {<<"group">>, possibly_list(Group)},
      {<<"group_role">>, GroupRole},
      {<<"group_policy">>, Policy},
-     {<<"healthcheck">>, healthcheck_to_json(HealthCheck)}
+     {<<"healthcheck">>, healthcheck_to_json(HealthCheck)},
+     {<<"cpu_usage">>, UseCPU},
+     {<<"memory_usage">>, UseMem},
+     {<<"statistics_time">>, Timestamp}
     ];
 container_to_parse(CatchAll) ->
     io:format(user, "No match ~p~n",[CatchAll]).
@@ -424,5 +465,3 @@ json_to_ports(Ports) ->
 			 name=proplists:get_value(<<"name">>, Port, undefined)
 			}
 	      end, Ports).
-
-

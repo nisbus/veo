@@ -28,7 +28,6 @@ init(Req0, State) ->
     %%  {disk, UseDisk, AvailDisk, TotalDisk}
     %% } = 
     Resources = node_monitor:get_resources(),
-    io:format("Resources ~p~n", [Resources]),
     C0 = [{<<"containers">>, C}], 
 	 %%  {<<"resources">>, 
 	 %%   [

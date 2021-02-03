@@ -1,5 +1,5 @@
 default:
-	cd apps/veo/priv/veo-ui && ng serve & rebar3 shell
+	cd apps/veo/priv/veo-ui & rebar3 shell
 
 run:
 	docker run -d --privileged -e NAME=veo -e COOKIE=cookie veo:latest

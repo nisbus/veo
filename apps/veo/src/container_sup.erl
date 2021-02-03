@@ -44,9 +44,11 @@
 start_link() ->
     %% TODO, Detect if VEO is running in a container
     %% If it is we can't run the cleanup against VEO since it would kill it.
-%    cleanup(), 
     Name = list_to_atom(atom_to_list(erlang:node())++atom_to_list(?MODULE)),
-    supervisor:start_link({global, Name}, ?MODULE, []).
+    Result = supervisor:start_link({global, Name}, ?MODULE, []),
+    sync(),
+    Result.
+
 
 %% %%%===================================================================
 %% %%% Supervisor callbacks
@@ -66,7 +68,6 @@ start_link() ->
 			[ChildSpec :: supervisor:child_spec()]}} |
 		  ignore.
 init([]) ->
-%    cleanup(),
     Spec = {container_monitor, 
 	    {container_monitor, start_link, []},
 	    temporary, brutal_kill, worker, [container_monitor]},
@@ -82,8 +83,10 @@ init([CID]) when is_list(CID) ->
     Spec = {container_monitor, 
 	    {container_monitor, start_link, [CID]},
 	    temporary, brutal_kill, worker, [container_monitor]},
-    {ok, {{simple_one_for_one, 0, 1}, [Spec]}}.
+    {ok, {{simple_one_for_one, 0, 1}, [Spec]}};
 
+init([CID]) ->
+    lager:debug("Unknown spec ~p~n", [CID]).
 
 %% %%------------------------------------------------------------------------------
 %% %% @doc
@@ -132,12 +135,15 @@ run_on_node(Nodes, Service, Count) ->
     run_on_node(Nodes, Service, Count-1).
 	
 run_on_node(Node, Service) ->
+    lager:debug("Run on node ~p~n", [Node]),
     Where = list_to_atom(atom_to_list(Node)++atom_to_list(?MODULE)),
     Supervisor = global:whereis_name(Where),
+    lager:debug("Supervisor ~p~n", [Where]),
     Result = case Supervisor of
 		 undefined ->
 		     "Not able to start service "++atom_to_list(Node);
 		 _ ->
+		     lager:debug("Starting service on ~p, ~p~n", [Node, Service]),
 		     supervisor:start_child(Supervisor, [Service])
 	     end,
     Result.
@@ -235,34 +241,46 @@ get_containers() ->
 %%
 %% @end
 %%------------------------------------------------------------------------------
--spec(cleanup() -> ok | [term()] | any()).
-cleanup() ->
+-spec(sync() -> ok | [term()] | any()).
+sync() ->
     Running = get_containers(),
     case Running of 
 	{ok,[]} ->
 	    Containers = container_storage:containers_for_node(erlang:node()),
 	    case Containers of
 		[] ->
-		    lager:debug("Cleanup, nothing to do");
+		    lager:debug("Sync, nothing to do ~n");
 		_ ->
-		    lists:foreach(fun(#container{id=CID}) ->					  
-					  docker_container:stop(CID),
-					  docker_container:delete(CID),
-					  container_storage:remove_container(CID)
-				  end, Containers)
+		    lager:debug("Containers not running, starting now ~n")
+		    %% TODO: Start containers that should be running on the node
+		    %% lists:foreach(fun(#container{id=CID}) ->					  
+		    %% 			  docker_container:stop(CID),
+		    %% 			  docker_container:delete(CID),
+		    %% 			  container_storage:remove_container(CID)
+		    %% 		  end, Containers)
 	    end;
 	{ok, L} ->
-	    lists:foreach(fun(C) ->
+	    Containers = container_storage:containers_for_node(erlang:node()),
+	    case Containers of
+		[] ->
+		    lager:debug("There are containers running that are not part of VEO, adding to monitoring ~n"),		    
+		    lists:foreach(fun(C) ->
 				  CID = proplists:get_value('Id', C, undefined),
 				  case CID of 
 				      undefined ->
 					  lager:warning("Unable to get Id for container~n");
 				      _ ->
-					  docker_container:stop(CID),
-					  docker_container:delete(CID),
-					  container_storage:remove_container(CID)
+					  lager:info("Found existing container ~p~n", [CID]),
+					  run_on_node(node(), CID)
+
+					  %% docker_container:stop(CID),
+					  %% docker_container:delete(CID),
+					  %% container_storage:remove_container(CID)
 				  end
 			  end, L);
+		_ ->
+		    lager:debug("Sync existing with configured containers ~n")
+	    end;
 	_ ->
 	    lager:warning("Unexpected result from running containers ~p~n",[Running])
     end.

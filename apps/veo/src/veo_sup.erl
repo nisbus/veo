@@ -37,6 +37,7 @@ start_link() ->
 					{"/api/containers/stop/:container", rest_api_handler, [stop]},
 					{"/api/nodes/:node", rest_api_handler, [nodes]},
 					{"/api/nodes", rest_api_handler, [nodes]},
+					{"/api/resources", rest_api_handler, [resources]},
     					{"/websocket", websocket_handler, []},
     					{"/[...]", cowboy_static, {priv_dir, veo, "veo-ui/dist/veo-ui"}}
     				       ]}]),

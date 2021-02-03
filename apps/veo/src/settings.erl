@@ -9,7 +9,7 @@
 %%% Created :  19 Jun 2020 by nisbus <nisbus@gmail.com>
 %%%-------------------------------------------------------------------
 -module(settings).
--export([get_nodes/0, get_nodes/1, get_applications/0, get_applications/1, get_application/2, get_roles/1, parse_service/1]).
+-export([get_nodes/0, get_nodes/1, get_applications/0, get_applications/1, get_application/2, get_application/1, get_roles/1, parse_service/1]).
 -include("../include/container.hrl").
 
 %%--------------------------------------------------------------------
@@ -83,6 +83,12 @@ get_applications(File) ->
 -spec get_application(string(), _) -> [#service{} | {_,_,_,_,_,_,_}].
 get_application(File, Name) ->
     Applications = get_applications(File),
+    lists:filter(fun(#service{name=ServiceName}) ->
+			 ServiceName =:= Name
+		 end, Applications).
+
+get_application(Name) ->
+    Applications = get_applications(),
     lists:filter(fun(#service{name=ServiceName}) ->
 			 ServiceName =:= Name
 		 end, Applications).

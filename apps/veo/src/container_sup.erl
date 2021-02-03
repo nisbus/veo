@@ -135,10 +135,8 @@ run_on_node(Nodes, Service, Count) ->
     run_on_node(Nodes, Service, Count-1).
 	
 run_on_node(Node, Service) ->
-    lager:debug("Run on node ~p~n", [Node]),
     Where = list_to_atom(atom_to_list(Node)++atom_to_list(?MODULE)),
     Supervisor = global:whereis_name(Where),
-    lager:debug("Supervisor ~p~n", [Where]),
     Result = case Supervisor of
 		 undefined ->
 		     "Not able to start service "++atom_to_list(Node);
@@ -270,7 +268,6 @@ sync() ->
 				      undefined ->
 					  lager:warning("Unable to get Id for container~n");
 				      _ ->
-					  lager:info("Found existing container ~p~n", [CID]),
 					  run_on_node(node(), CID)
 
 					  %% docker_container:stop(CID),

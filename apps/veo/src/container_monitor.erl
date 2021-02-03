@@ -159,12 +159,14 @@ handle_cast({status, Status}, State) ->
     lager:debug("Status changed ~p~n", Status),
     {noreply, State};
 
-handle_cast(monitor, #container{id=CID, service=#service{name=Name}}=State) ->
+handle_cast(monitor, #container{id=CID, service=#service{name=_Name}}=State) ->
     Stats = erldocker_api:get([containers, CID, stats], [{stream, false}]),
+    folsom_metrics:notify({veo_stats_calls, 1}),
     NewState = case parse_stats(Stats) of
-		   {ok, Parsed} -> State#container{stats=Parsed};
-		   {error, Error} -> 
-		       lager:warning("Error getting stats for service ~p, ~p~n", [Name, Error]),
+		   {ok, Parsed} -> 
+		       State#container{stats=Parsed};
+		   {error, _Error} -> 
+		       folsom_metrics:notify({veo_stats_failures, 1}),
 		       State
 	       end,
     timer:apply_after(10000, ?MODULE, handle_cast, [monitor, State]),    
@@ -216,6 +218,7 @@ handle_info({'EXIT', _Pid, Reason}, #container{service=Service,
 		true ->
 		    lager:info("EXITING: restart counter reached~n", []),
 		    stop(State),
+		    folsom_metrics:notify({veo_failed_containers, 1}),
 		    {noreply, State};
 		false ->
 		    lager:info("RESTARTING ~s, ~p, ~p~n", [Reason, Service, Counter]),
@@ -433,7 +436,8 @@ restart(#container{pid=Pid,
 	   service=#service{
 			    group=undefined}}) ->
     gen_server:cast(Pid, stop),
-    gen_server:cast(self(), start);
+    gen_server:cast(self(), start),
+    folsom_metrics:notify({veo_restarted_containers, 1});
 
 %% A master dies and the policy is to kill all when master dies
 restart(#container{service=
@@ -445,7 +449,8 @@ restart(#container{service=
     lists:foreach(fun(#container{pid=Pid}) ->
 			  gen_server:cast(Pid, stop),
     			  gen_server:cast(Pid, start)
-    		  end, Containers);
+    		  end, Containers),
+    folsom_metrics:notify({veo_restarted_containers, 1});
 
 %% A slave dies and the policy is to kill all when master dies
 restart(#container{service=
@@ -453,7 +458,8 @@ restart(#container{service=
 			  group_role=_, 
 			  group_policy=master_kills_all}, pid=Pid}) ->
     gen_server:cast(Pid, stop),
-    gen_server:cast(Pid, start);
+    gen_server:cast(Pid, start),
+    folsom_metrics:notify({veo_restarted_containers, 1});    
 
 %% The policy is that one dead kills the group
 restart(#container{service=
@@ -465,7 +471,8 @@ restart(#container{service=
     lists:foreach(fun(#container{pid=Pid}) ->
 			  gen_server:cast(Pid, stop),
     			  gen_server:cast(Pid, start)
-    		  end, Containers);
+    		  end, Containers),
+    folsom_metrics:notify({veo_restarted_containers, 1});
 
 %% A single container dies in a group with a policy of one_for_one
 %% Just restart that container
@@ -474,7 +481,8 @@ restart(#container{pid=Pid,
 		       #service{
 			  group_policy=one_for_one}}) ->
     gen_server:cast(Pid, stop),
-    gen_server:cast(Pid, start).
+    gen_server:cast(Pid, start),
+    folsom_metrics:notify({veo_restarted_containers, 1}).
 
 %%%===================================================================
 %%% Stop containers based on their group settings
@@ -504,15 +512,18 @@ create(Name, Json, Image, Service) ->
 	    SafeId = to_atom_safe(Container),
 	    Res = gen_server:start_link({local, SafeId}, ?MODULE, [Service#service{id = Container}, false], []),
 	    check_assignment(Res, Service),
+	    folsom_metrics:notify({veo_started_containers, 1}),
 	    Res;
 	{ok, [{_,Container}, {<<"Warnings">>, Warnings}]} ->
 	    lager:warning("Container created with warnings ~p~n", [Warnings]),
 	    SafeId = to_atom_safe(to_name(Container, Name, Image)),
 	    Res = gen_server:start_link({local, SafeId}, ?MODULE, [Service#service{id = Container}, false], []),
 	    check_assignment(Res, Service),
+	    folsom_metrics:notify({veo_started_containers, 1}),
 	    Res;
 	{error, {Code, Error}} ->
 	    lager:error("Error creating container ~p~n", [Error]),
+	    folsom_metrics:notify({veo_failed_containers, 1}),
 	    {error, {Code, Error}};
 	{error, Error} ->
 	    {error, Error}	
@@ -525,6 +536,7 @@ stop(#container{pid=Pid,
     lager:info("Stopping container with no group ~p~n", [ID]),
     gen_server:cast(Pid, stop),
     deallocate(State#container.service),
+    folsom_metrics:notify({veo_stopped_containers, 1}),
     remove_from_dns(State);
 
 stop(#container{service=
@@ -541,6 +553,7 @@ stop(#container{service=
     		  end, Containers),
     deallocate(State#container.service),
     remove_from_dns(State),
+    folsom_metrics:notify({veo_stopped_containers, 1}),
     gen_server:cast(self(), stop);
 
 stop(#container{pid=Pid, service=
@@ -551,6 +564,7 @@ stop(#container{pid=Pid, service=
     lager:info("Stopping ~p container in a group (master kills all) ~p~n", [Role, Group]),
     deallocate(State#container.service),
     remove_from_dns(State),
+    folsom_metrics:notify({veo_stopped_containers, 1}),
     gen_server:cast(Pid, stop);
 
 stop(#container{service=
@@ -566,6 +580,7 @@ stop(#container{service=
     		  end, Containers),
     deallocate(State#container.service),
     remove_from_dns(State),
+    folsom_metrics:notify({veo_stopped_containers, 1}),
     gen_server:cast(self(), stop);
 
 stop(#container{pid=Pid,
@@ -576,6 +591,7 @@ stop(#container{pid=Pid,
     lager:info("Stopping container in a group (one for one) ~p~n", [ID]),
     gen_server:cast(Pid, stop),
     deallocate(State#container.service),
+    folsom_metrics:notify({veo_stopped_containers, 1}),
     remove_from_dns(State).
 
 %%--------------------------------------------------------------------

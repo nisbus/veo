@@ -38,6 +38,7 @@ start_link() ->
 					{"/api/nodes/:node", rest_api_handler, [nodes]},
 					{"/api/nodes", rest_api_handler, [nodes]},
 					{"/api/resources", rest_api_handler, [resources]},
+					{"/api/metrics", rest_api_handler, [metrics]},
     					{"/websocket", websocket_handler, []},
     					{"/[...]", cowboy_static, {priv_dir, veo, "veo-ui/dist/veo-ui"}}
     				       ]}]),

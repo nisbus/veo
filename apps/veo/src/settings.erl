@@ -29,7 +29,6 @@ get_nodes() ->
 -spec get_nodes(File::string()) -> [{atom(), string()}].
 get_nodes(File) ->
     [Parsed] = yamerl_constr:file(File),
-    io:format(user, "Parsed ~p~n", [Parsed]),
     Nodes = proplists:get_value("nodes", Parsed),
     lists:foldl(fun([{_, Node}, {_, Role}], Acc) ->
 			[{list_to_atom(Node), Role} | Acc]
@@ -153,8 +152,6 @@ parse_service(Service) ->
 	   dns=Dns,
 	   command=Command,
 	   entrypoint=EntryPoint},
-    T = is_record(S, service),
-    io:format(user, "Parsed to service record ~p~n",[T]),
     S.
     
     

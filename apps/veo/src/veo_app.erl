@@ -25,6 +25,7 @@
 start(_StartType, _StartArgs) ->
     node_monitor:start_link(),
     container_storage:create_container_table(),
+    create_metrics(),
     veo_sup:start_link().
     
 
@@ -40,5 +41,15 @@ stop(_State) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+create_metrics() ->
+    folsom_metrics:new_meter(veo_stats_calls),
+    folsom_metrics:new_meter(veo_stats_failures),
+    folsom_metrics:new_meter(veo_rest_success),
+    folsom_metrics:new_meter(veo_rest_failures),
+    folsom_metrics:new_meter(veo_rest_errors),
+    folsom_metrics:new_meter(veo_started_containers),
+    folsom_metrics:new_meter(veo_restarted_containers),
+    folsom_metrics:new_meter(veo_stopped_containers),
+    folsom_metrics:new_meter(veo_failed_containers).
 
 		     

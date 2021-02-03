@@ -44,7 +44,6 @@ resource_exists(Req, State) ->
 %%                       API implementation                         %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 handle_request(Req, #state{op=Op} = State) ->
-    lager:debug("Handling request ~p, ~p",[Op, Req]),
     Rq = 
 	case Op of
 	    containers ->
@@ -56,23 +55,38 @@ handle_request(Req, #state{op=Op} = State) ->
 	    stop ->
 		stop(Req);
 	    resources ->
-		resources(Req)	    
+		resources(Req);
+	    metrics ->
+		metrics(Req)
 	end,
     {ok, Rq, State}.
 
+metrics(Req) ->
+    Metrics = lists:map(fun(Metric) ->
+				[{Metric, folsom_metrics:get_metric_value(Metric)}]
+			end, folsom_metrics:get_metrics()),
+    cowboy_req:reply(200, 
+		     #{<<"content-type">> => <<"application/json">>}, 
+		     to_json(Metrics), 
+		     Req).
+    
+    
 %% Stops a container
 stop(Req) ->
     Container = cowboy_req:binding(container, Req, undefined),
     case Container of
 	undefined ->
+	    folsom_metrics:notify({veo_rest_errors, 1}),
 	    cowboy_req:reply(409, <<"No container specified">>, Req);
 	_ -> 
 	    case container_sup:stop_service(Container) of
 		{ok, stopped} ->
+		    folsom_metrics:notify({veo_rest_success, 1}),
 		    cowboy_req:reply(200,
 			 <<"Stopped">>, 
 			 Req);
 		{error, Error} ->
+		    folsom_metrics:notify({veo_rest_failures, 1}),
 		    cowboy_req:reply(500, #{<<"content-type">> => <<"application/json">>}, 
 				     error_to_binary(Error), Req)
 	    end
@@ -104,6 +118,7 @@ resources(Req) ->
 							  ]
     						  end, C0)
     			 end, [], AllContainers),
+    folsom_metrics:notify({veo_rest_success, 1}),
     cowboy_req:reply(200, 
 		     #{<<"content-type">> => <<"application/json">>}, 
 		     to_json([{<<"nodes">>, Nodes},
@@ -121,6 +136,7 @@ node_info(Req) ->
 	    Nodes = lists:map(fun(N) ->
 				      node_to_parse(N)
 			      end, AllResources),
+	    folsom_metrics:notify({veo_rest_success, 1}),
 	    cowboy_req:reply(200, 
 			     #{<<"content-type">> => <<"application/json">>}, 
 			     to_json(Nodes), 
@@ -128,6 +144,7 @@ node_info(Req) ->
 	_ -> %% Only requested node
 	    NodeName = list_to_atom(binary_to_list(Node)),
 	    Result = rpc:call(NodeName, node_monitor, get_resources,[]),
+	    folsom_metrics:notify({veo_rest_success, 1}),
 	    cowboy_req:reply(200, 
 			     #{<<"content-type">> => <<"application/json">>}, 
 			     to_json(node_to_parse(Result)), 
@@ -146,6 +163,7 @@ containers(Req) ->
 								  container_to_parse(C)
 							  end, C0)
 				 end, [], AllContainers),
+	    folsom_metrics:notify({veo_rest_success, 1}),
 	    cowboy_req:reply(200,
 			 #{<<"content-type">> => <<"application/json">>}, 
 			 to_json(Result), 
@@ -159,7 +177,7 @@ containers(Req) ->
 						    container_to_parse(C)
 					    end, NodeContainers)
 			 end,
-	    lager:debug("Got containers for node ~p", [Containers]),
+	    folsom_metrics:notify({veo_rest_success, 1}),
 	    cowboy_req:reply(200,
 			 #{<<"content-type">> => <<"application/json">>}, 
 			 to_json(Containers), 
@@ -173,6 +191,7 @@ container(Req) ->
 	<<"GET">> ->
 	    case Container of
 		undefined ->
+		    folsom_metrics:notify({veo_rest_errors, 1}),
 		    cowboy_req:reply(404, #{<<"content-type">> => <<"application/json">>},
 				     <<"No container specified for GET request">>,
 				     Req);
@@ -189,6 +208,7 @@ container(Req) ->
 		    X = lists:map(fun(C) ->
 					  container_to_parse(C)
 				  end, Found),
+		    folsom_metrics:notify({veo_rest_success, 1}),
 		    cowboy_req:reply(200,
 				     #{<<"content-type">> => <<"application/json">>}, 
 				     to_json(X), 
@@ -200,13 +220,16 @@ container(Req) ->
 	    {ok, Body, Req0} = cowboy_req:read_body(Req),
 	    Service = json_to_service(Body),
 	    case container_sup:add_service(Service) of
-		{error, {Code, Error}} ->					      
+		{error, {Code, Error}} ->
+		    folsom_metrics:notify({veo_rest_failures, 1}),
 		    cowboy_req:reply(Code, #{<<"content-type">> => <<"application/json">>}, 
 				     error_to_binary(Error), Req0);
 		{error, Error} ->
+		    folsom_metrics:notify({veo_rest_failures, 1}),
 		    cowboy_req:reply(500, #{<<"content-type">> => <<"application/json">>}, 
 				     error_to_binary(Error), Req0);
 		_ ->
+		    folsom_metrics:notify({veo_rest_success, 1}),
 		    cowboy_req:reply(200, #{<<"content-type">> => <<"application/json">>}, 
 					    <<"success">>, Req0)		    
 	    end
@@ -241,6 +264,7 @@ node_to_parse(#node_state{node=Node, roles=Roles,
 				 },
 			 disk= #disk{
 				 used=UsedDisk,
+
 				 available=AvailDisk,
 				 total=TotalDisk}}) ->
     {N0, R0} = case Roles of

@@ -18,7 +18,8 @@
     jsx,
     cowboy,
     yamerl,
-    erldns
+    erldns,
+    folsom
    ]},
   {env,[]},
   {modules, []},

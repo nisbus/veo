@@ -24,3 +24,6 @@ dist/
 nginx.container
 apps/veo/doc/*
 !apps/veo/doc/overview.edoc
+
+# Working documents
+nodes.txt

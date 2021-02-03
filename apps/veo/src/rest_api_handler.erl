@@ -210,19 +210,19 @@ node_to_parse(#node_state{node=Node, roles=Roles,
 				 used=UsedDisk,
 				 available=AvailDisk,
 				 total=TotalDisk}}) ->
-
-    
-    %% lists:foldl(fun(Role, Acc) ->
-    %% 		      case Role of 
-    %% 			  {N,R} ->
-			      
     {N0, R0} = case Roles of
+		   undefined ->
+		       {Node, []};
+		   {N, [undefined|[]]} ->
+		       {list_to_binary(atom_to_list(N)), []};
 		   {N,[R|[]]} ->
 		       {list_to_binary(atom_to_list(N)), list_to_binary(R)};
 		   {N, [H|T]} ->
 		       {list_to_binary(atom_to_list(N)), lists:map(fun(X) ->
 									   list_to_binary(X)
 								   end, [H]++T)};
+		   {N, undefined} ->
+		       {list_to_binary(atom_to_list(N)), []};
 		   {N, R} -> {list_to_binary(atom_to_list(N)), list_to_binary(R)};
 		   _ -> 
 		       {list_to_binary(atom_to_list(Node)), list_to_binary(Roles)}

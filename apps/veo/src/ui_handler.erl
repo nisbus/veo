@@ -22,38 +22,40 @@ init(Req0, State) ->
     C = lists:map(fun(X) ->
 		      proplists:get_value(<<"name">>, X)
 	      end, Containers),
-    {state,
-     {memory, UseMem, AvailMem, TotalMem}, 
-     {cpu, CpuCount, CpuUse, CpuAvail}, 
-     {disk, UseDisk, AvailDisk, TotalDisk}
-    } = node_monitor:get_resources(),
-    C0 = [{<<"containers">>, C}, 
-	  {<<"resources">>, 
-	   [
-	    {<<"memory">>, 
-	     [
-	      {<<"total">>, TotalMem},
-	      {<<"used">>, UseMem},
-	      {<<"available">>, AvailMem}
-	     ]
-	    },
-	    {<<"cpu">>,
-	     [
-	      {<<"count">>, CpuCount},
-	      {<<"used">>, CpuUse},
-	      {<<"available">>, CpuAvail}
-	     ]
-	    },
-	    {<<"disk">>,
-	     [
-	      {<<"total">>, TotalDisk},
-	      {<<"used">>, UseDisk},
-	      {<<"available">>, AvailDisk}
-	     ]
-	    }
-	   ]
-	  }
-	 ],
+    %% {state,
+    %%  {memory, UseMem, AvailMem, TotalMem}, 
+    %%  {cpu, CpuCount, CpuUse, CpuAvail}, 
+    %%  {disk, UseDisk, AvailDisk, TotalDisk}
+    %% } = 
+    Resources = node_monitor:get_resources(),
+    io:format("Resources ~p~n", [Resources]),
+    C0 = [{<<"containers">>, C}], 
+	 %%  {<<"resources">>, 
+	 %%   [
+	 %%    {<<"memory">>, 
+	 %%     [
+	 %%      {<<"total">>, TotalMem},
+	 %%      {<<"used">>, UseMem},
+	 %%      {<<"available">>, AvailMem}
+	 %%     ]
+	 %%    },
+	 %%    {<<"cpu">>,
+	 %%     [
+	 %%      {<<"count">>, CpuCount},
+	 %%      {<<"used">>, CpuUse},
+	 %%      {<<"available">>, CpuAvail}
+	 %%     ]
+	 %%    },
+	 %%    {<<"disk">>,
+	 %%     [
+	 %%      {<<"total">>, TotalDisk},
+	 %%      {<<"used">>, UseDisk},
+	 %%      {<<"available">>, AvailDisk}
+	 %%     ]
+	 %%    }
+	 %%   ]
+	 %%  }
+	 %% ],
     Response = jsx:encode(C0),
     Req = cowboy_req:reply(200,
 			   #{<<"content-type">> => <<"application/json">>},

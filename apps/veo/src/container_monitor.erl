@@ -165,6 +165,12 @@ handle_cast({status, Status}, State) ->
 
 handle_cast(monitor, #container{id=CID}=State) ->
     docker_container:attach_stream_with_logs(CID),
+    %% Me = self(),
+    %% spawn(fun() ->
+    %% 		  Exited = erldocker_api:wait(CID),
+    %% 		  io:format("WAIT RETURN ~p~n", [Exited]),
+    %% 		  Me ! Exited
+    %% 	  end),
     {noreply, State};
 
 handle_cast(stats, #container{id=CID}=State) ->
@@ -198,6 +204,7 @@ handle_cast(Request, State) ->
 handle_info({_Pid, {data, _Data}}, #container{logs = _Logs} = State) when is_binary(_Data) ->
     %% lager:info("Receiving binary log ~s~n", [binary_to_list(_Data)]),
     %% THIS EATS UP A LOT OF MEMORY MAKING THE SYSTEM UNUSABLE
+    io:format("Log ~s~n", [_Data]),
     %% LogLine = io_lib:format("~s", [Data]),
     %% NewLogs = lists:append(LogLine, Logs),
     %% NewState = State#state{logs=NewLogs},
@@ -206,7 +213,7 @@ handle_info({_Pid, {data, _Data}}, #container{logs = _Logs} = State) when is_bin
 handle_info({_Pid, {data, _Data}}, #container{logs = _Logs} = State) ->
     %% lager:info("Receiving log ~p~n", [_Data]),
     %% THIS EATS UP A LOT OF MEMORY MAKING THE SYSTEM UNUSABLE
-    %% LogLine = io_lib:format("~s", [Data]),
+    io:format("Log ~s~n", [_Data]),
     %% NewLogs = lists:append(LogLine, Logs),
     %% NewState = State#state{logs=NewLogs},
     {noreply, State};
@@ -215,6 +222,19 @@ handle_info({_Pid, {error, {Reason, Data}}}, State) ->
     lager:error("ERROR ~s:  ~p ~p~n", [Reason, Data, State]),
     container_storage:remove_container(State#container.id),
     {noreply, State};
+
+handle_info({hacnkey_response, _SenderRef, Data}, State) ->
+    io:format("Log ~s~n", [Data]),
+    {noreply, State};
+handle_info({hackney_response,_,<<>>}, State) ->
+    io:format("Empty ~n",[]),
+    {noreply, State};
+handle_info({hackney_response,_,done}, State) ->
+    io:format("Gone ~n",[]),
+    {noreply, State};    
+handle_info({hackney_response,_,D}, State) ->
+    io:format("Data ~s~n",[D]),
+    {noreply, State};    
 
 handle_info({'EXIT', _Pid, Reason}, #container{service=Service, 
 					   restart_counter = Counter

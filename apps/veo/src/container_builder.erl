@@ -21,11 +21,11 @@
 %%-------------------------------------------------------------------
 -spec(build(Service::#service{}) -> binary()). 
 build(#service{
-	 environment=Env,	 
+	 environment=Environment,	 
 	 image=Image,
 	 volumes=Volumes,
 	 memory=Memory,
-	 pid_mode=Pid,
+	 pid_mode=Pid,	 
 	 network_mode=Network,
 	 cpus=Cpu,
 	 privileged=Privileged,
@@ -37,7 +37,8 @@ build(#service{
 	 dns=Dns,
 	 command=Command,
 	 entrypoint=Entrypoint,
-	 task=Task
+	 task=Task,
+	 name=Name
 	}) ->
     B = [{<<"Image">>, list_to_binary(Image)},
 	  {<<"AttachStdout">>, false},
@@ -80,22 +81,29 @@ build(#service{
 		 lists:append(B1, Health)
 	 end,
 
-    
-    EnvWithPorts = case Ports of
+    DefaultPorts = default_ports(Ports),
+    Env = case Environment of
+	      [] ->
+		  [list_to_binary("MESOS_CONTAINER_NAME="++Name)];
+	      _ ->
+		  lists:append(Environment, [list_to_binary("MESOS_CONTAINER_NAME="++Name)])
+	  end,
+		      
+    EnvWithPorts = case DefaultPorts of
 		       #{} -> Env;
 		       [] -> Env;
 		       PortList ->
 			   {Count, PortEnvs} = lists:foldl(fun(#port{container_port = Container,
-								     host_port=_Host,
-								     random = IsZero}, Acc) ->
-								   case IsZero of
-								       false -> 
-									   Acc;
-								       true ->
-								   	   {C,A} = Acc,
-								   	   NewEnv = lists:append(A, ["PORT"++integer_to_list(C)++"="++integer_to_list(Container)]),
-								   	   {C+1, NewEnv}
-								   end
+								     host_port=_Host, name=Name}, Acc) ->
+								   {C,A} = Acc,
+								   io:format("Port name ~p~n", [Name]),
+								   NewEnv = case Name of
+										<<"ready_port">> ->
+										    lists:append(A, ["PORT_READYPORT"++"="++integer_to_list(Container)]);
+										_ ->
+										    lists:append(A, ["PORT"++integer_to_list(C)++"="++integer_to_list(Container)])
+									    end,
+								   {C+1, NewEnv}								   
 							   end, {0, []}, PortList),
 			   case Count of 
 			       0 ->
@@ -143,20 +151,27 @@ build(#service{
     		      L -> 
     			  lists:append(BaseConfig, [{<<"Labels">>, L}])
     		  end,
-    Config = case default_ports(Ports) of
+    Config = case DefaultPorts of
     		 #{} ->
     		     lists:append(LabelConfig,[{<<"HostConfig">>, Host}]);
     		 Po ->
-    		     PortMapping = lists:map(fun({Container, Bindings, _}) ->
-    						     {Container, Bindings}
-    					     end, Po),
+    		     PortMapping = lists:map(fun(#port{container_port=Container, protocol=Proto, host_port=HostPort}) ->
+						     PortAndProto = case Proto of 
+									undefined ->
+									    list_to_binary(integer_to_list(Container));
+									_ -> 
+									    list_to_binary(integer_to_list(Container)++"/"++atom_to_list(Proto))
+								    end,
+						     {PortAndProto, [[{<<"HostPort">>, HostPort}]]}
+    					     end, Po),		 
     		     WithPorts = lists:append(Host, [{<<"PortBindings">>, PortMapping}]),
     		     lists:append(LabelConfig, [{<<"HostConfig">>, WithPorts}])
     	     end,
     case Task of
 	undefined ->
 	    io:format("Encoding ~p~n", [Config]),
-	    jsx:encode(Config);
+	    JSON = jsx:encode(Config),
+	    JSON;
 	_->	    
 	    ConfigWithTask = lists:append(Config, Task),
 	    io:format("Encoding ~p~n", [ConfigWithTask]),
@@ -326,13 +341,18 @@ default_command(undefined) ->
 default_command(Cmd) ->
     CommandList = case io_lib:latin1_char_list(Cmd) of
 		      true ->
-			  io:format("It's just a string ~n",[]),
 			  Split = re:split(Cmd, " ", [{return, list}]),
 			  lists:map(fun(E) ->
 					    list_to_binary(E)
 				    end,Split);
 		      false ->	    
-			  lists:foldl(fun(C, Acc) ->
+			  lists:foldl(fun(Part, Acc) ->
+					      C = case is_binary(Part) of
+						      true ->
+							  binary_to_list(Part);
+						      false ->
+							  Part
+						  end,				
 					      case lists:member("=", C) of
 						  true ->
 						      Split = re:split(C, "=", [{return, list}]),
@@ -341,7 +361,7 @@ default_command(Cmd) ->
 							      end, Split),
 						      lists:append(Acc, Converted);
 						  false ->
-						      lists:append(Acc, list_to_binary(C))
+						      lists:append(Acc, [list_to_binary(C)])
 					      end
 				      end, [], Cmd)
 		  end,
@@ -391,7 +411,7 @@ default_ports([]) ->
 default_ports(undefined) ->
     #{};
 default_ports(Ports) ->
-    Mappings = lists:foldl(fun(#port{container_port=Container, protocol=Proto, host_port=Host}, Acc) ->
+    Mappings = lists:foldl(fun(#port{container_port=ContainerPortSpecified, protocol=Proto, host_port=Host, name=Name}, Acc) ->
 				   {Port, IsZero} = case Host of
 							0 ->
 							    {ok, Listen} = gen_tcp:listen(0, []),
@@ -401,16 +421,16 @@ default_ports(Ports) ->
 							_ ->
 							    {list_to_binary(integer_to_list(Host)), false}
 						    end,
-				   ContainerPort = case Proto of 
-						       undefined -> list_to_binary(Container);
-						       _ -> list_to_binary(integer_to_list(Container)++"/"++atom_to_list(Proto))
-						   end,
-						    
-				   Format = [{ContainerPort, [[{
-								<<"HostPort">>, Port
-							       }
-							      ]]
-					     , IsZero}],
+				   Container = case ContainerPortSpecified of 
+						   0 ->						  
+						       list_to_integer(binary_to_list(Port));
+						   _ -> ContainerPortSpecified
+					       end,
+				   Format = [#port{container_port=Container, 
+						   protocol=Proto,
+						   host_port=Port,
+						   random=IsZero,
+						   name=Name}],
 				   lists:append(Acc, Format)
 			   end,
 			   [], Ports),
@@ -493,7 +513,11 @@ default_env(undefined) ->
     undefined;
 default_env(Env) ->
     lists:foldl(fun(Elem, Acc) ->
-			[list_to_binary(Elem)|Acc]
+			case is_list(Elem) of
+			    true ->
+				[list_to_binary(Elem)|Acc];
+			    false -> [Elem|Acc]
+			end
 		end, [], Env).
 
 default_labels([]) ->

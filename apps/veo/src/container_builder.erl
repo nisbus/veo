@@ -8,10 +8,11 @@
 %%% Created :  6 Dec 2019 by nisbus <nisbus@gmail.com>
 %%%-------------------------------------------------------------------
 -module(container_builder).
--include("../include/service.hrl").
+
+-include("../include/container.hrl").
 -export([build/1]).
 -export([get_config/1]).
--export([parse_inspect/2]).
+-export([parse_inspect/2, set_container_properties_from_inspect/2]).
 
 %%-------------------------------------------------------------------
 %% @doc
@@ -164,6 +165,18 @@ build(#service{
 
 %%-------------------------------------------------------------------
 %% @doc
+%% Fills in the container properties from an inspect result
+%% @end
+%%-------------------------------------------------------------------
+-spec(set_container_properties_from_inspect(Inspect::any(), Service::#service{}) -> #container{}).
+set_container_properties_from_inspect(Inspect, Service) ->
+    Config = proplists:get_value('Config', Inspect, undefined),
+    HostName = proplists:get_value(<<"Hostname">>, Config, undefined),
+    State =  proplists:get_value('State', Inspect, undefined),
+    Status = proplists:get_value(<<"Status">>, State, undefined),
+    #container{service=Service, status=Status, hostname=HostName}.
+%%-------------------------------------------------------------------
+%% @doc
 %% Parses the settings reported by the docker daemon into a service record.
 %% @end
 %%-------------------------------------------------------------------
@@ -187,7 +200,7 @@ parse_inspect(Inspect, #service{ports=ServicePorts}) ->
     Disk = proplists:get_value(<<"DiskQuota">>, HostConfig, 0),
     ULimits = parse_ulimits_from_inspect(proplists:get_value(<<"ULimits">>, HostConfig, undefined)),
     Dns = proplists:get_value(<<"Dns">>, HostConfig, undefined),
-    Entrypoint = proplists:get_value("Entrypoint", Config, undefined),
+    Entrypoint = proplists:get_value(<<"Entrypoint">>, Config, undefined),
     Name = case TaskID of 
 	       undefined ->
 		   InspectName;
@@ -235,6 +248,7 @@ parse_inspect(Inspect, #service{ports=ServicePorts}) ->
 -spec(get_config(CID::binary()) -> #service{}).
 get_config(CID) ->
     {ok, Inspect} = docker_container:container(CID),
+    io:format("Got config ~p~n", [Inspect]),
     InspectName = proplists:get_value('Name', Inspect, undefined),
     Container = settings:get_application(InspectName),
     Return = case Container of 
@@ -495,6 +509,8 @@ default_labels(Labels) ->
 		end,
 		[], Labels).
 
+parse_ports([{}], []) ->
+    [];
 parse_ports(null, _) ->
     [];
 parse_ports(Ports, []) ->

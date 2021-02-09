@@ -141,7 +141,7 @@ run_on_node(Node, Service) ->
 		 undefined ->
 		     "Not able to start service "++atom_to_list(Node);
 		 _ ->
-		     lager:debug("Starting service on ~p, ~p~n", [Node, Service]),
+		     lager:debug("Starting service on ~p, ~p, ~p~n", [Node, Service, Supervisor]),
 		     supervisor:start_child(Supervisor, [Service])
 	     end,
     Result.

@@ -53,6 +53,7 @@ start_link(CID) when is_binary(CID) ->
     Service = container_builder:get_config(CID),
     Res = gen_server:start_link({local, SafeId}, ?MODULE, [Service#service{restart=never, id=CID}, true], []),
     check_assignment(Res, Service),
+    folsom_metrics:notify({veo_started_containers, 1}),
     Res.
     
 
@@ -87,16 +88,19 @@ init([#service{id=ContainerID, healthcheck=HealthCheck} = Service, Exists]) ->
 		_ ->
 		    timer:send_interval(Interval, check_health)
 	    end
-    end,    
+    end,
+    {ok, Inspect} = docker_container:container(ContainerID),
+    Container = container_builder:set_container_properties_from_inspect(Inspect, Service),
+    gen_server:cast(self, stats),
     {ok, 
-     #container{
-	id=ContainerID,
-	logs=[],
-	restart_counter = 0,
-	service=Service,
-	pid=self(),
-	node=erlang:node()
-       }
+     Container#container{
+       id=ContainerID,
+       logs=[],
+       restart_counter = 0,
+       service=Service,
+       pid=self(),
+       node=erlang:node()
+      }
     }.
 
 %%--------------------------------------------------------------------
@@ -159,7 +163,11 @@ handle_cast({status, Status}, State) ->
     lager:debug("Status changed ~p~n", Status),
     {noreply, State};
 
-handle_cast(monitor, #container{id=CID, service=#service{name=_Name}}=State) ->
+handle_cast(monitor, #container{id=CID}=State) ->
+    docker_container:attach_stream_with_logs(CID),
+    {noreply, State};
+
+handle_cast(stats, #container{id=CID}=State) ->
     Stats = erldocker_api:get([containers, CID, stats], [{stream, false}]),
     folsom_metrics:notify({veo_stats_calls, 1}),
     NewState = case parse_stats(Stats) of
@@ -169,7 +177,7 @@ handle_cast(monitor, #container{id=CID, service=#service{name=_Name}}=State) ->
 		       folsom_metrics:notify({veo_stats_failures, 1}),
 		       State
 	       end,
-    timer:apply_after(10000, ?MODULE, handle_cast, [monitor, State]),    
+    timer:apply_after(10000, ?MODULE, handle_cast, [stats, State]),    
     {noreply, NewState};
 
 handle_cast(Request, State) ->
@@ -188,7 +196,7 @@ handle_cast(Request, State) ->
 			 {noreply, NewState :: term(), hibernate} |
 			 {stop, Reason :: normal | term(), NewState :: term()}.
 handle_info({_Pid, {data, _Data}}, #container{logs = _Logs} = State) when is_binary(_Data) ->
-%    lager:info("Receiving binary log ~s~n", [binary_to_list(_Data)]),
+    %% lager:info("Receiving binary log ~s~n", [binary_to_list(_Data)]),
     %% THIS EATS UP A LOT OF MEMORY MAKING THE SYSTEM UNUSABLE
     %% LogLine = io_lib:format("~s", [Data]),
     %% NewLogs = lists:append(LogLine, Logs),
@@ -196,7 +204,7 @@ handle_info({_Pid, {data, _Data}}, #container{logs = _Logs} = State) when is_bin
     {noreply, State};
 
 handle_info({_Pid, {data, _Data}}, #container{logs = _Logs} = State) ->
-%    lager:info("Receiving log ~p~n", [_Data]),
+    %% lager:info("Receiving log ~p~n", [_Data]),
     %% THIS EATS UP A LOT OF MEMORY MAKING THE SYSTEM UNUSABLE
     %% LogLine = io_lib:format("~s", [Data]),
     %% NewLogs = lists:append(LogLine, Logs),
@@ -210,27 +218,32 @@ handle_info({_Pid, {error, {Reason, Data}}}, State) ->
 
 handle_info({'EXIT', _Pid, Reason}, #container{service=Service, 
 					   restart_counter = Counter
-					  } = State) ->    
-    case Service#service.restart of
-	restart ->
-	    lager:info("RESTARTING ~p, ~s, ~p~n", [Service, Reason, Counter]),
-	    case Counter > Service#service.restart_count of
-		true ->
-		    lager:info("EXITING: restart counter reached~n", []),
+					  } = State) -> 
+    case _Pid == self() of
+	false ->	    
+	    io:format("CAUGHT EXIT PID = ~p, Self = ~p, ~p~n", [_Pid, self(), Reason]),
+	    {noreply, State};
+	true ->
+	    case Service#service.restart of
+		restart ->
+		    lager:info("RESTARTING ~p, ~s, ~p~n", [Service, Reason, Counter]),
+		    case Counter > Service#service.restart_count of
+			true ->
+			    lager:info("EXITING: restart counter reached~n", []),
+			    stop(State),
+			    folsom_metrics:notify({veo_failed_containers, 1}),
+			    {noreply, State};
+			false ->
+			    lager:info("RESTARTING ~s, ~p, ~p~n", [Reason, Service, Counter]),
+			    restart(State),
+			    {noreply, State}
+		    end;
+		never ->
+		    lager:info("EXITING ~n", []),
 		    stop(State),
-		    folsom_metrics:notify({veo_failed_containers, 1}),
-		    {noreply, State};
-		false ->
-		    lager:info("RESTARTING ~s, ~p, ~p~n", [Reason, Service, Counter]),
-		    restart(State),
 		    {noreply, State}
-	    end;
-	never ->
-	    lager:info("EXITING ~n", []),
-	    stop(State),
-	    {noreply, State}
+	    end
     end;
-
 handle_info(check_health, #container{id=CID}=State) ->
     Inspect = docker_container:container(CID),
     case Inspect of
@@ -526,6 +539,7 @@ create(Name, Json, Image, Service) ->
 	    folsom_metrics:notify({veo_failed_containers, 1}),
 	    {error, {Code, Error}};
 	{error, Error} ->
+	    folsom_metrics:notify({veo_failed_containers, 1}),
 	    {error, Error}	
     end.
 
@@ -610,7 +624,7 @@ parse_status(Inspect) ->
 	    Health = proplists:get_value(<<"Health">>, State, undefined),
 	    case Health of
 		undefined ->
-		    undefined;
+		    proplists:get_value(<<"Status">>, State, undefined);
 		_ ->
 		    proplists:get_value(<<"Status">>, Health, undefined)
 	    end
@@ -684,6 +698,8 @@ parse_stats({ok, Stats}) ->
 	   cpu= get_cpu_percentage(CPU, PreCPU),
 	   timestamp=Read}}.
 
+get_memory_percentage([{}]) ->
+    #container_memory{};
 get_memory_percentage(Memory) ->    
     Usage = proplists:get_value(<<"usage">>, Memory),
     Cache = proplists:get_value(<<"cache">>, proplists:get_value(<<"stats">>, Memory)),
@@ -698,6 +714,13 @@ get_cpu_percentage(CPU, PreCPU) ->
     CPUCount = proplists:get_value(<<"online_cpus">>, CPU),
     SystemUsage = proplists:get_value(<<"system_cpu_usage">>, CPU),
     SystemPrevious = proplists:get_value(<<"system_cpu_usage">>, PreCPU),
-    SystemDelta =  SystemUsage - SystemPrevious,    
-    Percentage = (Delta / SystemDelta) * CPUCount * 100.0,
-    #container_cpu{count=CPUCount, used=Percentage}.
+    case {SystemUsage, SystemPrevious} of
+	{undefined, _} ->
+	    #container_cpu{};
+	{_, undefined} ->
+	    #container_cpu{};
+	_ ->
+	    SystemDelta =  SystemUsage - SystemPrevious,    
+	    Percentage = (Delta / SystemDelta) * CPUCount * 100.0,
+	    #container_cpu{count=CPUCount, used=Percentage}
+    end.

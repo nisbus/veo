@@ -25,6 +25,7 @@
 init(Req, Opts) ->
     [Op | _] = Opts,
     State = #state{op=Op},
+    io:format("REQ ~p~n", [Req]),
     {cowboy_rest, Req, State}.
 
 content_types_accepted(Req, State) ->
@@ -34,6 +35,7 @@ content_types_provided(Req, State) ->
     {[{<<"application/json">>, handle_request}], Req, State}.    
 
 allowed_methods(Req, State) ->
+    io:format("Checking allowed"),
     {[<<"GET">>, <<"OPTIONS">>, <<"POST">>, <<"DELETE">>], Req, State}.
 
 resource_exists(Req, State) ->
@@ -112,7 +114,7 @@ resources(Req) ->
 									 }}) ->
 							  [
 							   {<<"id">>, Id},
-							   {<<"name">>, Name},
+							   {<<"name">>, possibly_list(Name)},
 							   {<<"cpu">>, UsedCPU},
 							   {<<"memory">>, UsedMem}
 							  ]
@@ -302,11 +304,8 @@ container_to_parse(#container{
 		      restart_counter=Restarts,
 		      status=Status,
 		      ip_address=IP,
-		      stats=#stats{
-			       cpu=#container_cpu{used=UseCPU},
-			       memory=#container_memory{used=UseMem},
-			       timestamp=Timestamp
-			      },
+		      hostname=Hostname,
+		      stats=Stats,
 		      service=#service{
 				 id=ID,
 				 name=Name,
@@ -333,11 +332,24 @@ container_to_parse(#container{
 				 group_policy=Policy,
 				 healthcheck=HealthCheck
 			       }}) ->
+    {UseCPU, UseMem, Timestamp} = case Stats of
+				      undefined ->
+					  {0,0,<<"">>};
+				      #stats{
+					 cpu=#container_cpu{used=CPU},
+					 memory=#container_memory{used=Mem},
+					 timestamp=Time
+					} ->
+					  {CPU, Mem, Time};
+				      _ -> 
+					  io:format("Stats ~p", [Stats])
+				  end,
     [
      {<<"name">>, possibly_list(Name)},
      {<<"id">>, ID},
      {<<"restart_count">>, Restarts},
      {<<"status">>, Status},
+     {<<"hostname">>, Hostname},
      {<<"ip_address">>, IP},
      {<<"restart_policy">>, possibly_atom(Restart)},
      {<<"privileged">>, Priv},

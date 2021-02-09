@@ -26,6 +26,7 @@
 		    service = #service{} :: #service{},
 		    pid:: pid(),
 		    status,
+		    hostname,
 		    ip_address,
 		    port_maps,
 		    node,

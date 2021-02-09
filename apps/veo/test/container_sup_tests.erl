@@ -5,7 +5,6 @@
 container_add_service_test() ->
     PrivDir = code:priv_dir(veo),
     application:start(yamerl),
-    [H|[B]] = settings:get_applications(PrivDir++"/test_cluster.yml"),
+    [_H|[B]] = settings:get_applications(PrivDir++"/veo.yml"),
     io:format(user, "Service = ~p~n",[B]).
-%    container_sup:add_service(B).
 

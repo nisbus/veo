@@ -164,13 +164,7 @@ handle_cast({status, Status}, State) ->
     {noreply, State};
 
 handle_cast(monitor, #container{id=CID}=State) ->
-    docker_container:attach_stream_with_logs(CID),
-    %% Me = self(),
-    %% spawn(fun() ->
-    %% 		  Exited = erldocker_api:wait(CID),
-    %% 		  io:format("WAIT RETURN ~p~n", [Exited]),
-    %% 		  Me ! Exited
-    %% 	  end),
+    docker_container:wait(CID, self()),
     {noreply, State};
 
 handle_cast(stats, #container{id=CID}=State) ->
@@ -223,47 +217,35 @@ handle_info({_Pid, {error, {Reason, Data}}}, State) ->
     container_storage:remove_container(State#container.id),
     {noreply, State};
 
-handle_info({hacnkey_response, _SenderRef, Data}, State) ->
-    io:format("Log ~s~n", [Data]),
+handle_info({stopped, Status}, State) ->
+    self() ! {'EXIT', self(), "Stopped with exit code "++integer_to_list(Status)},
     {noreply, State};
-handle_info({hackney_response,_,<<>>}, State) ->
-    io:format("Empty ~n",[]),
+handle_info({stopped, Error, Status}, State) ->
+    self() ! {'EXIT', self(), "Stopped with error "++Error++" and exit code "++integer_to_list(Status)},
     {noreply, State};
-handle_info({hackney_response,_,done}, State) ->
-    io:format("Gone ~n",[]),
-    {noreply, State};    
-handle_info({hackney_response,_,D}, State) ->
-    io:format("Data ~s~n",[D]),
-    {noreply, State};    
 
 handle_info({'EXIT', _Pid, Reason}, #container{service=Service, 
 					   restart_counter = Counter
 					  } = State) -> 
-    case _Pid == self() of
-	false ->	    
-	    io:format("CAUGHT EXIT PID = ~p, Self = ~p, ~p~n", [_Pid, self(), Reason]),
-	    {noreply, State};
-	true ->
-	    case Service#service.restart of
-		restart ->
-		    lager:info("RESTARTING ~p, ~s, ~p~n", [Service, Reason, Counter]),
-		    case Counter > Service#service.restart_count of
-			true ->
-			    lager:info("EXITING: restart counter reached~n", []),
-			    stop(State),
-			    folsom_metrics:notify({veo_failed_containers, 1}),
-			    {noreply, State};
-			false ->
-			    lager:info("RESTARTING ~s, ~p, ~p~n", [Reason, Service, Counter]),
-			    restart(State),
-			    {noreply, State}
-		    end;
-		never ->
-		    lager:info("EXITING ~n", []),
+    case Service#service.restart of
+	restart ->
+	    case Counter > Service#service.restart_count of
+		true ->
+		    lager:info("EXITING: restart counter reached (~p) for ~p~n", [Counter, Service]),
 		    stop(State),
+		    folsom_metrics:notify({veo_failed_containers, 1}),
+		    {noreply, State};
+		false ->
+		    lager:info("RESTARTING ~s, ~p, ~p~n", [Reason, Service, Counter]),
+		    restart(State),
 		    {noreply, State}
-	    end
+	    end;
+	never ->
+	    lager:info("EXITING ~p~n", [Service]),
+	    stop(State),
+	    {noreply, State}
     end;
+
 handle_info(check_health, #container{id=CID}=State) ->
     Inspect = docker_container:container(CID),
     case Inspect of
